@@ -3,9 +3,16 @@ import { computePosition, offset, flip, shift, type VirtualElement } from '@floa
 export default defineContentScript({
   matches: ['<all_urls>'],
   main() {
+    // Skip iframes - only run in main frame
+    if (window.self !== window.top) {
+      return;
+    }
+
     const iconSize = 16;
     let currentIcon: HTMLElement | null = null;
     let currentInputElement: HTMLElement | null = null;
+    let positionUpdateTimeout: number | null = null;
+    let lastPositionUpdate = 0;
 
     function createIcon(): HTMLElement {
       const icon = document.createElement('img');
@@ -138,14 +145,33 @@ export default defineContentScript({
     }
 
     async function updateIconPosition() {
-      if (currentIcon && currentInputElement && document.contains(currentInputElement)) {
-        const textLength = getTextLength(currentInputElement);
-        if (textLength > 1) {
-          await positionIcon(currentInputElement, currentIcon);
-        } else {
-          removeIcon();
-        }
+      if (!currentIcon || !currentInputElement || !document.contains(currentInputElement)) {
+        return;
       }
+
+      const textLength = getTextLength(currentInputElement);
+      if (textLength > 1) {
+        await positionIcon(currentInputElement, currentIcon);
+      } else {
+        removeIcon();
+      }
+    }
+
+    function schedulePositionUpdate() {
+      // Throttle position updates to max once per 100ms
+      const now = Date.now();
+      if (now - lastPositionUpdate < 100) {
+        if (positionUpdateTimeout) {
+          clearTimeout(positionUpdateTimeout);
+        }
+        positionUpdateTimeout = window.setTimeout(() => {
+          updateIconPosition();
+          lastPositionUpdate = Date.now();
+        }, 100);
+        return;
+      }
+      lastPositionUpdate = now;
+      updateIconPosition();
     }
 
     async function handleInput(e: Event) {
@@ -177,16 +203,11 @@ export default defineContentScript({
       }
     }
 
-    async function handleSelectionChange() {
-      await updateIconPosition();
-    }
-
-    async function handleScroll() {
-      await updateIconPosition();
-    }
-
-    async function handleResize() {
-      await updateIconPosition();
+    function handleSelectionChange() {
+      // Only update if we have an active icon
+      if (currentIcon && currentInputElement) {
+        schedulePositionUpdate();
+      }
     }
 
     function handleClick(e: MouseEvent) {
@@ -205,22 +226,26 @@ export default defineContentScript({
     document.addEventListener('input', handleInput, true);
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('click', handleClick, true);
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', handleResize);
-
-    // Handle dynamically added inputs
-    const observer = new MutationObserver(() => {
-      getTextInputElements().forEach(element => {
-        if (getTextLength(element) > 1 && (!currentInputElement || currentInputElement !== element)) {
-          const event = new Event('input', { bubbles: true });
-          element.dispatchEvent(event);
+    
+    // Throttle scroll and resize events
+    let scrollTimeout: number | null = null;
+    window.addEventListener('scroll', () => {
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = window.setTimeout(() => {
+        if (currentIcon && currentInputElement) {
+          schedulePositionUpdate();
         }
-      });
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+      }, 50);
+    }, { passive: true });
+    
+    let resizeTimeout: number | null = null;
+    window.addEventListener('resize', () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = window.setTimeout(() => {
+        if (currentIcon && currentInputElement) {
+          schedulePositionUpdate();
+        }
+      }, 100);
+    }, { passive: true });
   },
 });
