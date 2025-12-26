@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@floating-ui/dom':
+        specifier: ^1.7.4
+        version: 1.7.4
       '@floating-ui/react':
         specifier: ^0.27.16
         version: 0.27.16(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
