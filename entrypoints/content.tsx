@@ -42,11 +42,22 @@ export default defineContentScript({
       icon.style.opacity = '1';
       icon.setAttribute('data-extension-icon', 'true');
       
+      // Save selection immediately on mousedown (before Gmail can interfere)
+      icon.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (currentInputElement) {
+          saveSelection();
+        }
+      }, true);
+      
       icon.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         await handleIconClick();
-      });
+      }, true);
 
       return icon;
     }
@@ -84,8 +95,9 @@ export default defineContentScript({
     function getTextLength(element: HTMLElement): number {
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         return (element as HTMLInputElement | HTMLTextAreaElement).value.length;
-      } else if (element.isContentEditable) {
-        return element.textContent?.length || 0;
+      } else if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+        const text = element.textContent || element.innerText || '';
+        return text.trim().length;
       }
       return 0;
     }
@@ -251,29 +263,36 @@ export default defineContentScript({
     async function handleIconClick() {
       if (!currentInputElement) return;
 
-      // Save the current selection state IMMEDIATELY before any operations
-      // This is critical because clicking might clear the selection
+      // Check if we already have a saved selection (from mousedown)
       let hadExistingSelection = false;
-      let savedStart = null;
-      let savedEnd = null;
       
-      // For INPUT/TEXTAREA, save selectionStart/selectionEnd BEFORE anything else
+      // For INPUT/TEXTAREA, check saved selection
       if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
-        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
-        savedStart = input.selectionStart ?? 0;
-        savedEnd = input.selectionEnd ?? input.value.length;
-        hadExistingSelection = (savedStart !== savedEnd && savedEnd > savedStart);
-        
-        // Save the selection state
-        savedSelectionStart = savedStart;
-        savedSelectionEnd = savedEnd;
-        savedInputElement = currentInputElement;
+        if (savedSelectionStart !== null && savedSelectionEnd !== null && savedInputElement === currentInputElement) {
+          hadExistingSelection = (savedSelectionStart !== savedSelectionEnd && savedSelectionEnd > savedSelectionStart);
+        } else {
+          // Fallback: try to get current selection
+          const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+          const savedStart = input.selectionStart ?? 0;
+          const savedEnd = input.selectionEnd ?? input.value.length;
+          hadExistingSelection = (savedStart !== savedEnd && savedEnd > savedStart);
+          
+          // Save the selection state
+          savedSelectionStart = savedStart;
+          savedSelectionEnd = savedEnd;
+          savedInputElement = currentInputElement;
+        }
       } else {
-        // For contenteditable, check if there's a range
-        const selectionRange = getSelectionRange(currentInputElement);
-        hadExistingSelection = !!selectionRange;
-        if (selectionRange) {
-          saveSelection();
+        // For contenteditable, check if we have a saved selection
+        if (savedSelection && savedInputElement === currentInputElement) {
+          hadExistingSelection = true;
+        } else {
+          // Fallback: try to get current selection
+          const selectionRange = getSelectionRange(currentInputElement);
+          hadExistingSelection = !!selectionRange;
+          if (selectionRange) {
+            saveSelection();
+          }
         }
       }
 
@@ -288,6 +307,7 @@ export default defineContentScript({
           const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
           savedSelectionStart = 0;
           savedSelectionEnd = input.value.length;
+          savedInputElement = currentInputElement;
         } else {
           saveSelection();
         }
@@ -444,12 +464,8 @@ export default defineContentScript({
         return;
       }
 
-      const textLength = getTextLength(currentInputElement);
-      if (textLength > 1) {
-        await positionIcon(currentInputElement, currentIcon);
-      } else {
-        removeIcon();
-      }
+      // Always show icon, regardless of text length
+      await positionIcon(currentInputElement, currentIcon);
     }
 
     function schedulePositionUpdate() {
@@ -470,24 +486,50 @@ export default defineContentScript({
     }
 
     async function checkAndShowIcon(element: HTMLElement) {
-      const textLength = getTextLength(element);
+      // Always show icon for text input elements, regardless of text length
+      if (!element || !document.contains(element)) {
+        return;
+      }
+
+      // Check if this is a different element (for switching between multiple composers)
+      const isDifferentElement = currentInputElement !== element;
       
-      if (textLength > 1) {
-        if (!currentIcon || currentInputElement !== element) {
+      if (!currentIcon || isDifferentElement) {
+        // Remove old icon and prompt when switching to a different element
+        if (isDifferentElement) {
           removeIcon();
           removeFloatingPrompt();
-          currentIcon = createIcon();
-          currentInputElement = element;
-          document.body.appendChild(currentIcon);
         }
-        if (currentIcon.style.display === 'none') {
-          currentIcon.style.display = 'block';
-        }
-        await updateIconPosition();
-      } else {
-        removeIcon();
-        removeFloatingPrompt();
+        currentIcon = createIcon();
+        currentInputElement = element;
+        document.body.appendChild(currentIcon);
       }
+      
+      if (currentIcon.style.display === 'none') {
+        currentIcon.style.display = 'block';
+      }
+      
+      await updateIconPosition();
+    }
+
+    function findTextInputElement(element: HTMLElement): HTMLElement | null {
+      // Check if element itself is a text input
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        return element;
+      }
+      
+      // Check if element is contenteditable
+      if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+        return element;
+      }
+      
+      // Check parent for contenteditable (Gmail sometimes has nested structure)
+      const contentEditableParent = element.closest('[contenteditable="true"]') as HTMLElement;
+      if (contentEditableParent) {
+        return contentEditableParent;
+      }
+      
+      return null;
     }
 
     async function handleInput(e: Event) {
@@ -496,15 +538,10 @@ export default defineContentScript({
         return;
       }
 
-      const isTextInput = target.tagName === 'INPUT' || 
-                         target.tagName === 'TEXTAREA' || 
-                         target.isContentEditable;
-      
-      if (!isTextInput) {
-        return;
+      const textInputElement = findTextInputElement(target);
+      if (textInputElement) {
+        await checkAndShowIcon(textInputElement);
       }
-
-      await checkAndShowIcon(target);
     }
 
     async function handleFocus(e: Event) {
@@ -513,21 +550,29 @@ export default defineContentScript({
         return;
       }
 
-      const isTextInput = target.tagName === 'INPUT' || 
-                         target.tagName === 'TEXTAREA' || 
-                         target.isContentEditable;
-      
-      if (!isTextInput) {
-        return;
+      const textInputElement = findTextInputElement(target);
+      if (textInputElement) {
+        // Use requestAnimationFrame to ensure element is ready
+        requestAnimationFrame(async () => {
+          // Always update icon position when focusing, even if same element
+          // This handles cases where the element might have moved (e.g., Gmail composer switching)
+          await checkAndShowIcon(textInputElement);
+        });
       }
+    }
 
-      // Check if text already exists on focus
-      await checkAndShowIcon(target);
+    function handleBlur(e: Event) {
+      // Don't handle blur - let focus events handle switching between composers
+      // This prevents removing the icon when clicking between composer windows
     }
 
     function handleSelectionChange() {
       // Only update if we have an active icon
       if (currentIcon && currentInputElement && !floatingPromptContainer) {
+        // Save selection proactively for Gmail compatibility
+        if (currentInputElement) {
+          saveSelection();
+        }
         schedulePositionUpdate();
       }
     }
@@ -537,6 +582,13 @@ export default defineContentScript({
       
       // Don't close if clicking inside floating prompt
       if (target.closest('#floating-prompt-container')) {
+        return;
+      }
+
+      // Check if clicking on a text input - show icon immediately
+      const textInputElement = findTextInputElement(target);
+      if (textInputElement) {
+        checkAndShowIcon(textInputElement);
         return;
       }
 
@@ -573,6 +625,7 @@ export default defineContentScript({
     // Listen for input and focus events on all text fields
     document.addEventListener('input', handleInput, true);
     document.addEventListener('focus', handleFocus, true);
+    document.addEventListener('blur', handleBlur, true);
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('click', handleClick, true);
     document.addEventListener('keydown', handleKeyDown, true);

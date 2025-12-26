@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, X } from 'lucide-react';
+import { CornerDownLeft, X } from 'lucide-react';
 
 interface FloatingPromptProps {
   onClose: () => void;
@@ -111,15 +111,13 @@ export default function FloatingPrompt({ onClose, onSend, position, selectedText
         <button
           onClick={handleSend}
           disabled={!command.trim()}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-200"
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-200 bg-gray-900 text-white hover:bg-gray-800"
         >
-          <Send 
-            size={16} 
-            strokeWidth={0}
-            fill="currentColor"
-            className={command.trim() ? 'text-white' : 'text-gray-500'} 
-          />
           <span>Send</span>
+          <CornerDownLeft 
+            size={16} 
+            className="text-current"
+          />
         </button>
       </div>
     </div>
