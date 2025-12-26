@@ -85,11 +85,19 @@ export default function FloatingPrompt({ onClose, onSend, position, selectedText
         </button>
       </div>
 
-      {selectedText && (
+      {selectedText ? (
         <div className="mb-3">
           <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200">
             <p className="text-xs text-gray-600 font-mono truncate" title={selectedText}>
               {formatSelectedText(selectedText)}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <div className="px-3 py-2 bg-red-50 rounded-md border border-red-200">
+            <p className="text-xs text-red-600 font-medium">
+              Please highlight/select text for improvement
             </p>
           </div>
         </div>
@@ -110,7 +118,7 @@ export default function FloatingPrompt({ onClose, onSend, position, selectedText
       <div className="flex items-center justify-end">
         <button
           onClick={handleSend}
-          disabled={!command.trim()}
+          disabled={!command.trim() || !selectedText || selectedText.trim() === ''}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-200 bg-gray-900 text-white hover:bg-gray-800"
         >
           <span>Send</span>
