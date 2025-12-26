@@ -7,15 +7,10 @@ let lastKnownError: string = 'Ollama status not checked yet.';
 // Helper function to send messages to tabs and gracefully handle cases where the tab/UI is closed.
 function sendMessageToTab(tabId: number, message: any) {
   browser.tabs.sendMessage(tabId, message).catch((err) => {
-    // This error is expected if the UI on the content script is closed before the stream completes.
-    // We can safely ignore it.
-    if (err.message.includes('Receiving end does not exist')) {
-      return;
-    }
+    if (err.message.includes('Receiving end does not exist')) return;
     console.error(`Error sending message to tab ${tabId}:`, err);
   });
 }
-
 
 // Function to check Ollama status
 async function checkOllamaStatus() {
@@ -24,74 +19,70 @@ async function checkOllamaStatus() {
     lastKnownStatus = 'connected';
     lastKnownError = '';
     browser.action.setBadgeBackgroundColor({ color: '#22c55e' });
-    browser.action.setBadgeText({ text: ' ' }); // A single space is needed on some OSes to show the color
+    browser.action.setBadgeText({ text: ' ' });
   } catch (e: any) {
     lastKnownStatus = 'error';
     lastKnownError = e.message || 'Failed to connect to Ollama. Make sure it is running and CORS is configured for browser access.';
     browser.action.setBadgeBackgroundColor({ color: '#ef4444' });
     browser.action.setBadgeText({ text: ' ' });
   }
-  // Send an update to any open settings page
   browser.runtime.sendMessage({
     type: 'ollamaStatusUpdate',
     payload: { status: lastKnownStatus, error: lastKnownError }
-  }).catch(() => {
-    // Suppress "no receiving end" errors if the popup is not open
-  });
+  }).catch(() => {});
 }
 
 export default defineBackground(() => {
   const abortControllers = new Map<number, AbortController>();
 
   browser.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
-    switch (message.type) {
-      case 'stream-ollama-chat':
-        (async () => {
-          const tabId = sender.tab?.id;
-          if (!tabId) return;
+    const tabId = sender.tab?.id;
 
-          if (abortControllers.has(tabId)) abortControllers.get(tabId)?.abort();
-          const controller = new AbortController();
-          abortControllers.set(tabId, controller);
+    if (message.type === 'stream-ollama-chat') {
+      const tabId = sender.tab?.id;
+      if (!tabId) return false;
 
-          const { model, messages } = message.payload;
-          try {
-            const response = await ollama.chat({ model, messages, stream: true });
-            for await (const chunk of response) {
-              if (controller.signal.aborted) break;
-              sendMessageToTab(tabId, { type: 'ollama-chunk', payload: { content: chunk.message.content, done: chunk.done } });
-            }
-          } catch (error: any) {
-            sendMessageToTab(tabId, { type: 'ollama-error', payload: { message: error.message || "An unknown error occurred." } });
-          } finally {
-            abortControllers.delete(tabId);
+      (async () => {
+        if (abortControllers.has(tabId)) {
+            abortControllers.get(tabId)?.abort();
+        }
+        const controller = new AbortController();
+        abortControllers.set(tabId, controller);
+
+        const { model, messages } = message.payload;
+        try {
+          const response = await ollama.chat({ model, messages, stream: true });
+          
+          for await (const chunk of response) {
+            if (controller.signal.aborted) break;
+            sendMessageToTab(tabId, { type: 'ollama-chunk', payload: { content: chunk.message.content, done: chunk.done } });
           }
-        })();
-        break;
-
-      case 'stop-ollama-stream':
-        const tabId = sender.tab?.id;
-        if (tabId) {
-          abortControllers.get(tabId)?.abort();
+        } catch (error: any) {
+          sendMessageToTab(tabId, { type: 'ollama-error', payload: { message: error.message || "An unknown error occurred." } });
+        } finally {
           abortControllers.delete(tabId);
         }
-        break;
+      })();
+      
+      return true;
 
-      case 'getOllamaStatus':
-        sendResponse({ status: lastKnownStatus, error: lastKnownError });
-        break;
-
-      case 'getOllamaModels':
-        ollama.list().then(models => {
-          sendResponse({ models: models.models.map(m => m.name) });
-        }).catch(e => {
-          sendResponse({ error: e.message || "Failed to fetch models." });
-        });
-        return true; // Indicate we will respond asynchronously
-
-      default:
-        break;
+    } else if (message.type === 'stop-ollama-stream') {
+      if (tabId) {
+        abortControllers.get(tabId)?.abort();
+        abortControllers.delete(tabId);
+      }
+    } else if (message.type === 'getOllamaStatus') {
+      sendResponse({ status: lastKnownStatus, error: lastKnownError });
+    } else if (message.type === 'getOllamaModels') {
+      ollama.list().then(models => {
+        sendResponse({ models: models.models.map(m => m.name) });
+      }).catch(e => {
+        sendResponse({ error: e.message || "Failed to fetch models." });
+      });
+      return true;
     }
+    
+    return false;
   });
 
   browser.tabs.onRemoved.addListener((tabId) => {
@@ -103,16 +94,11 @@ export default defineBackground(() => {
 
   // --- LIFECYCLE EVENTS ---
   browser.runtime.onInstalled.addListener(() => {
-    console.log('Extension installed or updated. Setting up alarm.');
-    browser.alarms.create('ollama-status-check', {
-      delayInMinutes: 0,
-      periodInMinutes: 0.5,
-    });
+    browser.alarms.create('ollama-status-check', { delayInMinutes: 0, periodInMinutes: 0.5 });
     checkOllamaStatus();
   });
   
   browser.runtime.onStartup.addListener(() => {
-    console.log('Browser startup. Performing initial Ollama check.');
     checkOllamaStatus();
   });
 

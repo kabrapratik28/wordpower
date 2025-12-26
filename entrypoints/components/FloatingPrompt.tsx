@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CornerDownLeft, X } from 'lucide-react';
 import { PROMPT_PLACEHOLDER, PRESET_PROMPTS } from '../utils/constants';
 import { AutocompletePopup } from './AutocompletePopup';
+import { useTheme } from '../utils/useTheme';
 
 interface FloatingPromptProps {
   onClose: () => void;
@@ -14,25 +15,19 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
   const [autocompleteVisible, setAutocompleteVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const theme = useTheme();
 
   useEffect(() => {
     textareaRef.current?.focus();
-    // Show autocomplete on initial render if command is empty
-    if (command === '') {
-      setAutocompleteVisible(true);
-    }
+    if (command === '') setAutocompleteVisible(true);
   }, []);
 
   const handleSend = () => {
-    if (command.trim()) {
-      onSend(command);
-    }
+    if (command.trim()) onSend(command);
   };
   
   const handleCommandChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newCommand = e.target.value;
-    setCommand(newCommand);
-    // Hide autocomplete as soon as the user types
+    setCommand(e.target.value);
     setAutocompleteVisible(false);
   };
 
@@ -40,53 +35,75 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
     if (autocompleteVisible) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveIndex((prevIndex) => (prevIndex + 1) % PRESET_PROMPTS.length);
+        setActiveIndex((prev) => (prev + 1) % PRESET_PROMPTS.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveIndex((prevIndex) => (prevIndex - 1 + PRESET_PROMPTS.length) % PRESET_PROMPTS.length);
+        setActiveIndex((prev) => (prev - 1 + PRESET_PROMPTS.length) % PRESET_PROMPTS.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        const selectedPrompt = PRESET_PROMPTS[activeIndex];
-        setCommand(selectedPrompt);
+        setCommand(PRESET_PROMPTS[activeIndex]);
         setAutocompleteVisible(false);
-        // We need to manually trigger onSend here if we want instant sending on selection.
-        // Or, wait for a second Enter press. Let's wait.
       } else if (e.key === 'Escape') {
-          setAutocompleteVisible(false);
+        setAutocompleteVisible(false);
       }
-    } else {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            handleSend();
-        }
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleSend();
     }
   };
   
   const selectAutocomplete = (suggestion: string) => {
-      setCommand(suggestion);
-      setAutocompleteVisible(false);
-      textareaRef.current?.focus();
+    setCommand(suggestion);
+    setAutocompleteVisible(false);
+    textareaRef.current?.focus();
   }
+  
+  const colors = {
+      light: {
+        cardBg: 'white',
+        text: '#111827',
+        subtext: '#4b5563',
+        border: '#e5e7eb',
+        selectedBg: '#f9fafb',
+        buttonText: 'white',
+        buttonBg: '#111827',
+      },
+      dark: {
+        cardBg: '#1f2937', // gray-800
+        text: '#f9fafb', // gray-50
+        subtext: '#9ca3af', // gray-400
+        border: '#4b5563', // gray-600
+        selectedBg: '#374151', // gray-700
+        buttonText: '#1f2937', // gray-800
+        buttonBg: '#d1d5db', // gray-300
+      }
+  };
+  const currentColors = colors[theme];
 
   return (
     <div
       className="wordpower-card"
+      style={{ 
+          backgroundColor: currentColors.cardBg, 
+          borderColor: currentColors.border,
+          color: currentColors.text
+        }}
       onClick={(e) => e.stopPropagation()}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 500, color: '#111827' }}>Improve Selection</h3>
+        <h3 style={{ fontSize: '1rem', fontWeight: 500, color: currentColors.text }}>Improve Selection</h3>
         <button
           onClick={onClose}
-          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#9ca3af' }}
+          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: currentColors.subtext }}
           aria-label="Close"
         >
           <X size={18} />
         </button>
       </div>
 
-      <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: '#f9fafb', borderRadius: '0.375rem', border: '1px solid #e5e7eb' }}>
-        <p style={{ fontSize: '0.8rem', color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedText}>
+      <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: currentColors.selectedBg, borderRadius: '0.375rem', border: `1px solid ${currentColors.border}` }}>
+        <p style={{ fontSize: '0.8rem', color: currentColors.subtext, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedText}>
           {selectedText}
         </p>
       </div>
@@ -98,7 +115,17 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
             onChange={handleCommandChange}
             onKeyDown={handleKeyDown}
             placeholder={PROMPT_PLACEHOLDER}
-            style={{ width: '100%', padding: '8px', fontSize: '0.9rem', border: '1px solid #d1d5db', borderRadius: '0.375rem', resize: 'none', marginBottom: '12px' }}
+            style={{ 
+                width: '100%', 
+                padding: '8px', 
+                fontSize: '0.9rem', 
+                border: `1px solid ${currentColors.border}`, 
+                borderRadius: '0.375rem', 
+                resize: 'none', 
+                marginBottom: '12px',
+                backgroundColor: currentColors.selectedBg,
+                color: currentColors.text,
+            }}
             rows={2}
         />
         {autocompleteVisible && (
@@ -111,12 +138,11 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
         )}
       </div>
 
-
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           onClick={handleSend}
           disabled={!command.trim()}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '8px 12px', fontSize: '0.9rem', fontWeight: 500, borderRadius: '0.375rem', border: 'none', cursor: 'pointer', backgroundColor: '#111827', color: 'white', opacity: !command.trim() ? 0.6 : 1 }}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '8px 12px', fontSize: '0.9rem', fontWeight: 500, borderRadius: '0.375rem', border: 'none', cursor: 'pointer', backgroundColor: currentColors.buttonBg, color: currentColors.buttonText, opacity: !command.trim() ? 0.6 : 1 }}
         >
           <span>Send</span>
           <CornerDownLeft size={16} />
