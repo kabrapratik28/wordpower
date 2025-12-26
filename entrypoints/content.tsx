@@ -10,8 +10,26 @@ type UIState = 'hidden' | 'prompt' | 'streaming';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
-  main() {
+  async main() {
     if (window.self !== window.top) return;
+
+    // Blacklist check
+    const storage = await browser.storage.local.get('blacklist');
+    const blacklist: string[] = storage.blacklist || [];
+    
+    const isUrlBlacklisted = (currentUrl: string, patterns: string[]): boolean => {
+      return patterns.some(pattern => {
+        if (pattern.trim() === '') return false;
+        // Escape special regex characters, then replace wildcard * with .*
+        const regex = new RegExp(pattern.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*'));
+        return regex.test(currentUrl);
+      });
+    };
+
+    if (isUrlBlacklisted(window.location.href, blacklist)) {
+      console.log('WordPower: URL is blacklisted. Script will not run.');
+      return;
+    }
 
     let uiState: UIState = 'hidden';
     let uiContainer: HTMLElement | null = null;
@@ -58,26 +76,28 @@ export default defineContentScript({
     // --- Icon ---
     function createIcon(): HTMLElement {
       const container = document.createElement('div');
-      container.style.cssText = `position: fixed; z-index: 2147483647; width: ${iconSize}px; height: ${iconSize}px; pointer-events: none;`;
+      container.setAttribute('data-wordpower-icon', 'true'); // Add attribute for identification
+      container.style.cssText = `position: fixed; z-index: 2147483647; width: ${iconSize}px; height: ${iconSize}px; pointer-events: auto; cursor: pointer;`;
 
       const shadow = container.attachShadow({ mode: 'open' });
       const icon = document.createElement('img');
       icon.src = browser.runtime.getURL('icon/32.png');
-      icon.style.cssText = 'width: 100%; height: 100%; cursor: pointer; pointer-events: auto; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
+      icon.style.cssText = 'width: 100%; height: 100%; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
       
       // IMPORTANT: Capture selection on mousedown, before the click event blurs the input.
-      icon.addEventListener('mousedown', (e) => {
-        e.preventDefault(); // Prevents the browser from changing focus away from the text field.
+      container.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         lastSelectionSnapshot = selectionManager.snapshotSelection();
-      });
+      }, true);
 
-      icon.addEventListener('click', (e) => {
+      container.addEventListener('click', (e) => {
         e.stopPropagation();
         showUIPrompt(); // Now this can safely use the snapshot from mousedown.
-      });
+      }, true);
       
-      icon.addEventListener('mouseenter', showTooltip);
-      icon.addEventListener('mouseleave', hideTooltip);
+      container.addEventListener('mouseenter', showTooltip);
+      container.addEventListener('mouseleave', hideTooltip);
 
       shadow.appendChild(icon);
       return container;
@@ -143,9 +163,7 @@ export default defineContentScript({
         uiReactRoot = createRoot(shadowHost);
     }
 
-    function showUIPrompt(fromShortcut: boolean = false) {
-        // If triggered by a shortcut, we need to snapshot the selection now.
-        // If triggered by icon click, the snapshot is already taken on mousedown.
+    async function showUIPrompt(fromShortcut: boolean = false) {
         if (fromShortcut) {
             lastSelectionSnapshot = selectionManager.snapshotSelection();
         }
@@ -156,37 +174,39 @@ export default defineContentScript({
             lastSelectedText = selectedText;
             
             const selectionRange = window.getSelection()?.getRangeAt(0);
-            const referenceElement: Element | VirtualElement = selectionRange ? {
+            const referenceElement: Element | VirtualElement = selectionRange && selectionRange.getBoundingClientRect().width > 0 ? {
                 getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
                 getClientRects: () => selectionRange.getClientRects()
             } as VirtualElement : lastSelectionSnapshot.activeElement;
             
-            removeIcon(); // Hide icon when prompt opens
+            removeIcon();
             createUIContainer();
             
-            computePosition(referenceElement, uiContainer!, {
+            const { x, y } = await computePosition(referenceElement, uiContainer!, {
                 placement: 'top-start',
                 middleware: [offset({ mainAxis: 8 }), flip(), shift({ padding: 16 })]
-            }).then(({ x, y }) => {
-                lastPosition = { x, y };
-                uiState = 'prompt';
-                renderUI();
             });
+
+            lastPosition = { x, y };
+            uiState = 'prompt';
+            renderUI();
+
         } else {
-            // If no valid selection, reset the snapshot
             lastSelectionSnapshot = null;
         }
     }
 
     // --- Action Handlers ---
 
-    function handleSend(command: string) {
+    async function handleSend(command: string) {
       if (!lastSelectionSnapshot) return;
       uiState = 'streaming';
+      const storage = await browser.storage.local.get('selectedModel');
+      const model = storage.selectedModel || DEFAULT_MODEL;
       const fullPrompt = buildFinalPrompt(lastSelectedText, command);
       browser.runtime.sendMessage({
         type: 'stream-ollama-chat',
-        payload: { model: DEFAULT_MODEL, messages: [{ role: 'user', content: fullPrompt }] },
+        payload: { model: model, messages: [{ role: 'user', content: fullPrompt }] },
       });
       renderUI();
     }
@@ -253,22 +273,12 @@ export default defineContentScript({
     }
     
     function handleMouseDown(e: MouseEvent) {
-        // Stop clicks on our UI from dismissing the icon or UI itself
-        if (e.target instanceof HTMLElement) {
-            if (e.target.closest('[data-extension-ui-container]')) return;
-            const shadowRoot = e.target.shadowRoot;
-            if (shadowRoot && shadowRoot.querySelector('img.extension-icon')) return;
-        }
+        const path = e.composedPath();
+        if (currentIconContainer && path.includes(currentIconContainer)) return;
+        if (uiContainer && path.includes(uiContainer)) return;
 
-        // If any UI is open, don't interfere.
-        if (uiState !== 'hidden') return;
-        
-        // Otherwise, if a click happens away from the icon, remove the icon.
-        if(currentIconContainer) {
-            const iconEl = currentIconContainer.shadowRoot?.querySelector('img');
-            if(e.target !== iconEl){
-                removeIcon();
-            }
+        if (uiState === 'hidden') {
+            removeIcon();
         }
     }
 

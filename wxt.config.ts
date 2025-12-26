@@ -7,6 +7,10 @@ export default defineConfig({
     name: 'WordPower',
     description: 'Extension that shows an icon in text fields when typing',
     version: '0.0.1',
+    action: {
+      default_popup: 'popup.html',
+    },
+    permissions: ['storage', 'alarms'],
     web_accessible_resources: [
       {
         resources: ['icon/*.png'],
