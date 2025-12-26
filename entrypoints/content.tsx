@@ -285,6 +285,49 @@ export default defineContentScript({
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('keydown', handleGlobalKeyDown, true);
     document.addEventListener('mousedown', handleMouseDown, true);
+
+    function disableAutocomplete() {
+      const selectors = [
+        'input[type="email"]',
+        'input[type="password"]',
+        'input[name*="username"]',
+        'input[name*="email"]',
+        'input[id*="username"]',
+        'input[id*="email"]',
+      ];
+
+      const applyAutocompleteOff = (input: HTMLInputElement) => {
+        if (input.type === 'password') {
+          input.setAttribute('autocomplete', 'new-password');
+        } else {
+          input.setAttribute('autocomplete', 'off');
+        }
+      };
+
+      // Apply to existing elements
+      document.querySelectorAll<HTMLInputElement>(selectors.join(', ')).forEach(applyAutocompleteOff);
+
+      // Observe for new elements
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const element = node as HTMLElement;
+              if (element.matches(selectors.join(', '))) {
+                applyAutocompleteOff(element as HTMLInputElement);
+              }
+              element.querySelectorAll<HTMLInputElement>(selectors.join(', ')).forEach(applyAutocompleteOff);
+            }
+          });
+        });
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+
+      return () => observer.disconnect();
+    }
+    
+    const disconnectAutocompleteObserver = disableAutocomplete();
     
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
@@ -292,6 +335,7 @@ export default defineContentScript({
       document.removeEventListener('mousedown', handleMouseDown, true);
       handleClose();
       removeIcon();
+      disconnectAutocompleteObserver();
     };
   },
 });
