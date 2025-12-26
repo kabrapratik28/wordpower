@@ -4,123 +4,72 @@ import { CornerDownLeft, X } from 'lucide-react';
 interface FloatingPromptProps {
   onClose: () => void;
   onSend: (command: string) => void;
-  position: { x: number; y: number };
-  selectedText?: string;
+  selectedText: string;
 }
 
-function formatSelectedText(text: string, maxLength: number = 120): string {
-  // Replace newlines with spaces and normalize whitespace
-  let formatted = text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
-  
-  if (formatted.length <= maxLength) {
-    return formatted;
-  }
-  
-  // If overflow, show beginning + "..." + ending
-  const ellipsis = '...';
-  const ellipsisLength = ellipsis.length;
-  const availableLength = maxLength - ellipsisLength;
-  
-  // Split available length roughly 60/40 between start and end
-  const startLength = Math.floor(availableLength * 0.6);
-  const endLength = availableLength - startLength;
-  
-  const startPart = formatted.substring(0, startLength).trim();
-  const endPart = formatted.substring(formatted.length - endLength).trim();
-  
-  return `${startPart}${ellipsis}${endPart}`;
-}
-
-export default function FloatingPrompt({ onClose, onSend, position, selectedText }: FloatingPromptProps) {
+export default function FloatingPrompt({ onClose, onSend, selectedText }: FloatingPromptProps) {
   const [command, setCommand] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    // Focus textarea when component mounts
     textareaRef.current?.focus();
   }, []);
-
-  // Debug: log selectedText to verify it's being passed
-  useEffect(() => {
-    if (selectedText) {
-      console.log('Selected text received:', selectedText);
-    }
-  }, [selectedText]);
 
   const handleSend = () => {
     if (command.trim()) {
       onSend(command);
-      setCommand('');
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Prevent newline in textarea
+      e.stopPropagation();
       handleSend();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
     }
+    // Note: Global Escape is handled by content.tsx
   };
 
   return (
     <div
-      className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 min-w-[320px] max-w-[500px] z-[2147483647]"
+      className="wordpower-card"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-gray-900">Ask AI</h3>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+        <h3 style={{ fontSize: '1rem', fontWeight: 500, color: '#111827' }}>Improve Selection</h3>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#9ca3af' }}
           aria-label="Close"
         >
-          <X size={16} />
+          <X size={18} />
         </button>
       </div>
 
-      {selectedText ? (
-        <div className="mb-3">
-          <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200">
-            <p className="text-xs text-gray-600 font-mono truncate" title={selectedText}>
-              {formatSelectedText(selectedText)}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="mb-3">
-          <div className="px-3 py-2 bg-red-50 rounded-md border border-red-200">
-            <p className="text-xs text-red-600 font-medium">
-              Please highlight/select text for improvement
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="mb-3">
-        <textarea
-          ref={textareaRef}
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask AI to edit or generate..."
-          className="w-full px-3 py-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          rows={3}
-        />
+      <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: '#f9fafb', borderRadius: '0.375rem', border: '1px solid #e5e7eb' }}>
+        <p style={{ fontSize: '0.8rem', color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedText}>
+          {selectedText}
+        </p>
       </div>
 
-      <div className="flex items-center justify-end">
+      <textarea
+        ref={textareaRef}
+        value={command}
+        onChange={(e) => setCommand(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="e.g., 'Make this more formal' or 'Fix grammar'"
+        style={{ width: '100%', padding: '8px', fontSize: '0.9rem', border: '1px solid #d1d5db', borderRadius: '0.375rem', resize: 'none', marginBottom: '12px' }}
+        rows={2}
+      />
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           onClick={handleSend}
-          disabled={!command.trim() || !selectedText || selectedText.trim() === ''}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-200 bg-gray-900 text-white hover:bg-gray-800"
+          disabled={!command.trim()}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '8px 12px', fontSize: '0.9rem', fontWeight: 500, borderRadius: '0.375rem', border: 'none', cursor: 'pointer', backgroundColor: '#111827', color: 'white', opacity: !command.trim() ? 0.6 : 1 }}
         >
           <span>Send</span>
-          <CornerDownLeft 
-            size={16} 
-            className="text-current"
-          />
+          <CornerDownLeft size={16} />
         </button>
       </div>
     </div>

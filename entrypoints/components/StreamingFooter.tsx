@@ -1,135 +1,99 @@
-// entrypoints/components/StreamingFooter.tsx
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { CornerDownLeft } from 'lucide-react';
 
 interface StreamingFooterProps {
-  initialPrompt: string;
   onInsert: (text: string) => void;
   onClose: () => void;
   onStop: () => void;
 }
 
-const footerStyle: React.CSSProperties = {
-  position: 'fixed',
-  bottom: '0',
-  left: '0',
-  width: '100%',
-  backgroundColor: '#f9f9f9',
-  borderTop: '1px solid #ddd',
-  boxShadow: '0 -2px 10px rgba(0,0,0,0.1)',
-  zIndex: 2147483647, // Max z-index
-  padding: '16px',
-  display: 'flex',
-  flexDirection: 'column',
-  fontFamily: 'sans-serif',
-  fontSize: '14px',
-  color: '#333',
-};
-
-const controlsStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'flex-end',
-  alignItems: 'center',
-  marginBottom: '12px',
-};
-
-const buttonStyle: React.CSSProperties = {
-  marginLeft: '8px',
-  padding: '8px 16px',
-  border: '1px solid #ccc',
-  borderRadius: '4px',
-  backgroundColor: '#fff',
-  cursor: 'pointer',
-};
-
-const responseAreaStyle: React.CSSProperties = {
-  maxHeight: '200px',
-  overflowY: 'auto',
-  border: '1px solid #eee',
-  padding: '8px',
-  backgroundColor: '#fff',
-  whiteSpace: 'pre-wrap',
-  wordWrap: 'break-word',
-  minHeight: '50px',
-};
-
-const loadingStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#888',
-};
-
 export function StreamingFooter({ onInsert, onClose, onStop }: StreamingFooterProps) {
   const [streamedText, setStreamedText] = useState('');
   const [isStreaming, setIsStreaming] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
   const responseRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Focus the container on mount to capture keyboard events
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const messageListener = (message: any) => {
       if (message.type === 'ollama-chunk') {
-        if (isStreaming) { // Only update if still streaming
+        if (isStreaming) {
           setStreamedText((prev) => prev + message.payload.content);
         }
         if (message.payload.done) {
           setIsStreaming(false);
         }
       } else if (message.type === 'ollama-error') {
-        setError(`Ollama Error: ${message.payload.message}. Is Ollama running and the model available?`);
+        setError(`Ollama Error: ${message.payload.message}. Is Ollama running?`);
         setIsStreaming(false);
       }
     };
 
     browser.runtime.onMessage.addListener(messageListener);
 
-    // Auto-scroll to bottom
+    // Auto-scroll response area to bottom
     if (responseRef.current) {
       responseRef.current.scrollTop = responseRef.current.scrollHeight;
     }
 
-    return () => {
-      browser.runtime.onMessage.removeListener(messageListener);
-    };
+    return () => browser.runtime.onMessage.removeListener(messageListener);
   }, [isStreaming]);
 
   const handleInsert = () => {
-    onInsert(streamedText);
-    onClose();
+    if (streamedText) {
+      onInsert(streamedText);
+    }
   };
   
   const handleStop = () => {
-    setIsStreaming(false); // Immediately stop updating the UI
-    onStop(); // Tell the background to abort
+    setIsStreaming(false);
+    onStop();
   };
 
-  const handleClose = () => {
-    if (isStreaming) {
-      handleStop(); // Also stop the stream if closing
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Enter triggers insert
+    if (e.key === 'Enter' && !isStreaming && streamedText) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleInsert();
     }
-    onClose();
+    // Note: Global Escape is handled by content.tsx
   };
 
   return (
-    <div style={footerStyle}>
-      <div style={controlsStyle}>
-        {isStreaming && <button onClick={handleStop} style={buttonStyle}>Stop</button>}
+    <div
+      ref={containerRef}
+      tabIndex={-1} // Make it focusable
+      onKeyDown={handleKeyDown}
+      className="wordpower-card" // Use shared class from shadow DOM
+      style={{ outline: 'none' }} // Hide focus ring
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div ref={responseRef} style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '12px', padding: '8px', backgroundColor: '#f9fafb', borderRadius: '0.375rem', border: '1px solid #e5e7eb', minHeight: '60px', whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
+        {error ? <div style={{ color: '#ef4444' }}>{error}</div> : streamedText}
+        {isStreaming && !error && (
+          <span style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }}>▋</span>
+        )}
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+      </div>
+      
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+        {isStreaming && <button onClick={handleStop} style={{ padding: '8px 12px', border: '1px solid #d1d5db', background: 'white', borderRadius: '6px', cursor: 'pointer' }}>Stop</button>}
         <button 
           onClick={handleInsert} 
-          style={{ ...buttonStyle, cursor: streamedText.length === 0 ? 'not-allowed' : 'pointer' }}
-          disabled={streamedText.length === 0}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '8px 12px', fontSize: '0.9rem', fontWeight: 500, borderRadius: '0.375rem', border: 'none', cursor: 'pointer', backgroundColor: '#111827', color: 'white', opacity: isStreaming || !streamedText ? 0.6 : 1 }}
+          disabled={isStreaming || !streamedText}
         >
-          Insert
+          <span>Insert</span>
+          <CornerDownLeft size={16} />
         </button>
-        <button onClick={handleClose} style={buttonStyle}>Close</button>
-      </div>
-      <div ref={responseRef} style={responseAreaStyle}>
-        {error && <div style={{ color: 'red' }}>{error}</div>}
-        {!error && streamedText}
-        {isStreaming && !error && (
-          <div style={loadingStyle}>
-            <span>.</span><span>.</span><span>.</span>
-          </div>
-        )}
+        <button onClick={onClose} style={{ padding: '8px 12px', border: '1px solid #d1d5db', background: 'white', borderRadius: '6px', cursor: 'pointer' }}>Close (Esc)</button>
       </div>
     </div>
   );
