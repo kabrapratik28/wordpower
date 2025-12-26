@@ -67,11 +67,6 @@ export default function FloatingPrompt({ onClose, onSend, position, selectedText
   return (
     <div
       className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 min-w-[320px] max-w-[500px] z-[2147483647]"
-      style={{
-        position: 'fixed',
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-      }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between mb-3">

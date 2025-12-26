@@ -2,136 +2,105 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { computePosition, offset, flip, shift, type VirtualElement } from '@floating-ui/dom';
 import FloatingPrompt from './components/FloatingPrompt';
-import '@/assets/main.css';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
   main() {
-    // Skip iframes - only run in main frame
-    if (window.self !== window.top) {
-      return;
-    }
+    if (window.self !== window.top) return;
 
     const iconSize = 16;
-    let currentIcon: HTMLElement | null = null;
+    let currentIconContainer: HTMLElement | null = null;
     let currentInputElement: HTMLElement | null = null;
     let floatingPromptContainer: HTMLElement | null = null;
+    let floatingPromptShadowRoot: ShadowRoot | null = null;
     let reactRoot: any = null;
-    let positionUpdateTimeout: number | null = null;
-    let lastPositionUpdate = 0;
+    let selectionTimeout: number | null = null;
     let savedSelection: Range | null = null;
     let savedInputElement: HTMLElement | null = null;
     let savedSelectionStart: number | null = null;
     let savedSelectionEnd: number | null = null;
 
     function createIcon(): HTMLElement {
-      const icon = document.createElement('img');
-      const iconUrl = browser.runtime.getURL('icon/16.png' as any);
-      icon.src = iconUrl;
-      icon.alt = 'Extension icon';
-      icon.style.width = `${iconSize}px`;
-      icon.style.height = `${iconSize}px`;
-      icon.style.position = 'fixed';
-      icon.style.zIndex = '2147483647';
-      icon.style.cursor = 'pointer';
-      icon.style.pointerEvents = 'auto';
-      icon.style.userSelect = 'none';
-      icon.style.border = 'none';
-      icon.style.outline = 'none';
-      icon.style.display = 'block';
-      icon.style.opacity = '1';
-      icon.setAttribute('data-extension-icon', 'true');
-      
-      // Save selection immediately on mousedown (before Gmail can interfere)
-      icon.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        if (currentInputElement) {
-          saveSelection();
+      const container = document.createElement('div');
+      container.setAttribute('data-extension-icon-container', 'true');
+      container.style.cssText = 'position: fixed; z-index: 2147483647; pointer-events: none; margin: 0; padding: 0;';
+
+      const shadow = container.attachShadow({ mode: 'open' });
+      const style = document.createElement('style');
+      style.textContent = `
+        .extension-icon {
+          width: ${iconSize}px; height: ${iconSize}px; cursor: pointer;
+          pointer-events: auto; user-select: none; border: none; outline: none;
+          display: block; margin: 0; padding: 0; will-change: transform;
+          transition: opacity 0.2s;
         }
-      }, true);
+        .extension-icon:hover { opacity: 0.8; }
+      `;
+      shadow.appendChild(style);
+
+      const icon = document.createElement('img');
+      icon.className = 'extension-icon';
+      icon.src = browser.runtime.getURL('icon/16.png' as any);
+      icon.alt = 'Extension icon';
+      shadow.appendChild(icon);
       
       icon.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        e.stopImmediatePropagation();
         await handleIconClick();
       }, true);
 
-      return icon;
+      icon.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (currentInputElement) saveSelection();
+      }, true);
+
+      return container;
     }
 
     function removeIcon() {
-      if (currentIcon && currentIcon.parentNode) {
-        currentIcon.parentNode.removeChild(currentIcon);
-        currentIcon = null;
+      if (currentIconContainer?.parentNode) {
+        currentIconContainer.parentNode.removeChild(currentIconContainer);
       }
+      currentIconContainer = null;
       currentInputElement = null;
     }
 
-    function getTextInputElements(): HTMLElement[] {
-      const selectors = [
-        'input[type="text"]',
-        'input[type="email"]',
-        'input[type="password"]',
-        'input[type="search"]',
-        'input[type="url"]',
-        'input[type="tel"]',
-        'textarea',
-        '[contenteditable="true"]'
-      ];
-      
-      const elements: HTMLElement[] = [];
-      selectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => {
-          elements.push(el as HTMLElement);
-        });
-      });
-      
-      return elements;
-    }
-
-    function getTextLength(element: HTMLElement): number {
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        return (element as HTMLInputElement | HTMLTextAreaElement).value.length;
-      } else if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
-        const text = element.textContent || element.innerText || '';
-        return text.trim().length;
-      }
-      return 0;
-    }
-
-    function getSelectionRange(element: HTMLElement): Range | null {
+    function getSelectionRange(): Range | null {
       const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) {
-        return null;
-      }
-
+      if (!selection?.rangeCount) return null;
       const range = selection.getRangeAt(0);
-      
-      // Skip collapsed selections (cursor only, no text selected)
-      if (range.collapsed) {
-        return null;
-      }
-      
-      // Check if selection is within the current element
-      const commonAncestor = range.commonAncestorContainer;
-      const nodeElement = commonAncestor.nodeType === Node.TEXT_NODE 
-        ? commonAncestor.parentElement 
-        : commonAncestor as Element;
-      
-      if (!nodeElement || !element.contains(nodeElement)) {
-        return null;
-      }
+      return range.collapsed ? null : range;
+    }
 
-      return range;
+    function findTextInputElement(node: Node): HTMLElement | null {
+      const element = node.nodeType === Node.TEXT_NODE 
+        ? node.parentElement 
+        : node.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : null;
+      if (!element) return null;
+
+      // Standard HTML input elements (works everywhere: Reddit, Facebook, etc.)
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') return element;
+      
+      // Contenteditable elements (used by Gmail, WhatsApp Web, Messenger, etc.)
+      const contentEditable = element.getAttribute('contenteditable');
+      if (contentEditable === 'true' || (element.isContentEditable && contentEditable !== 'false')) {
+        return element;
+      }
+      
+      // Also check for role="textbox" (used by some sites)
+      if (element.getAttribute('role') === 'textbox') {
+        return element;
+      }
+      
+      // Check parent for contenteditable
+      return element.closest('[contenteditable="true"], [role="textbox"]') as HTMLElement;
     }
 
     function saveSelection() {
       if (!currentInputElement) return;
       
-      // For INPUT/TEXTAREA, save selectionStart/selectionEnd
       if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
         const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
         savedSelectionStart = input.selectionStart;
@@ -139,9 +108,8 @@ export default defineContentScript({
         savedInputElement = currentInputElement;
         savedSelection = null;
       } else {
-        // For contenteditable, save Range
         const selection = window.getSelection();
-        if (selection && selection.rangeCount > 0) {
+        if (selection?.rangeCount) {
           savedSelection = selection.getRangeAt(0).cloneRange();
           savedInputElement = currentInputElement;
           savedSelectionStart = null;
@@ -152,100 +120,45 @@ export default defineContentScript({
 
     function restoreSelection() {
       if (!savedInputElement || !document.contains(savedInputElement)) {
-        savedSelection = null;
-        savedInputElement = null;
-        savedSelectionStart = null;
-        savedSelectionEnd = null;
+        savedSelection = savedInputElement = null;
+        savedSelectionStart = savedSelectionEnd = null;
         return;
       }
 
-      // For INPUT/TEXTAREA, restore using selectionStart/selectionEnd
       if (savedInputElement.tagName === 'INPUT' || savedInputElement.tagName === 'TEXTAREA') {
         if (savedSelectionStart !== null && savedSelectionEnd !== null) {
-          const input = savedInputElement as HTMLInputElement | HTMLTextAreaElement;
-          input.setSelectionRange(savedSelectionStart, savedSelectionEnd);
+          (savedInputElement as HTMLInputElement | HTMLTextAreaElement).setSelectionRange(savedSelectionStart, savedSelectionEnd);
         }
       } else if (savedSelection) {
-        // For contenteditable, restore using Range
         const selection = window.getSelection();
         if (selection) {
           selection.removeAllRanges();
           try {
             selection.addRange(savedSelection);
-          } catch (e) {
-            // Selection might be invalid, try to select all text as fallback
-            selectAllText(savedInputElement);
-          }
+          } catch (e) {}
         }
       }
       
-      savedSelection = null;
-      savedInputElement = null;
-      savedSelectionStart = null;
-      savedSelectionEnd = null;
+      savedSelection = savedInputElement = null;
+      savedSelectionStart = savedSelectionEnd = null;
     }
 
-    function selectAllText(element: HTMLElement) {
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        const input = element as HTMLInputElement | HTMLTextAreaElement;
-        input.select();
-      } else if (element.isContentEditable) {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const selection = window.getSelection();
-        if (selection) {
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-      }
-    }
+    function getSelectedText(): string {
+      if (!currentInputElement) return '';
 
-    function getSelectedText(range: Range | null, element: HTMLElement, hasExistingSelection: boolean): string {
-      // For INPUT/TEXTAREA, get selected text from the element's selection
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        const input = element as HTMLInputElement | HTMLTextAreaElement;
-        const start = input.selectionStart ?? 0;
-        const end = input.selectionEnd ?? input.value.length;
-        
-        // If there was an existing selection, only return the selected portion
-        if (hasExistingSelection) {
-          const selected = input.value.substring(start, end);
-          return selected.trim();
+      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
+        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+        if (savedSelectionStart !== null && savedSelectionEnd !== null) {
+          return input.value.substring(savedSelectionStart, savedSelectionEnd).trim();
         }
-        
-        // If we selected all text (no existing selection), return all text
-        if (start === 0 && end === input.value.length) {
           return input.value.trim();
-        }
-        
-        // Otherwise return the selected portion
-        const selected = input.value.substring(start, end);
-        return selected.trim();
       }
       
-      // For contenteditable, use the range if available
-      if (range) {
-        const text = range.toString().trim();
-        if (text) {
-          // If there was an existing selection, return only the range text
-          if (hasExistingSelection) {
-            return text;
-          }
-          // If we selected all, check if range covers entire element
-          const elementText = element.textContent?.trim() || '';
-          if (text === elementText) {
-            return text; // All text was selected
-          }
-          return text; // Partial selection
-        }
+      const selection = window.getSelection();
+      if (selection?.rangeCount) {
+        return selection.getRangeAt(0).toString().trim();
       }
-      
-      // Only get all text if there was no existing selection
-      if (!hasExistingSelection && element.isContentEditable) {
-        return element.textContent?.trim() || '';
-      }
-      
-      return '';
+      return currentInputElement.textContent?.trim() || '';
     }
 
     function removeFloatingPrompt() {
@@ -253,9 +166,10 @@ export default defineContentScript({
         reactRoot.unmount();
         reactRoot = null;
       }
-      if (floatingPromptContainer && floatingPromptContainer.parentNode) {
+      if (floatingPromptContainer?.parentNode) {
         floatingPromptContainer.parentNode.removeChild(floatingPromptContainer);
         floatingPromptContainer = null;
+        floatingPromptShadowRoot = null;
       }
       restoreSelection();
     }
@@ -263,124 +177,111 @@ export default defineContentScript({
     async function handleIconClick() {
       if (!currentInputElement) return;
 
-      // Check if we already have a saved selection (from mousedown)
-      let hadExistingSelection = false;
-      
-      // For INPUT/TEXTAREA, check saved selection
-      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
-        if (savedSelectionStart !== null && savedSelectionEnd !== null && savedInputElement === currentInputElement) {
-          hadExistingSelection = (savedSelectionStart !== savedSelectionEnd && savedSelectionEnd > savedSelectionStart);
-        } else {
-          // Fallback: try to get current selection
-          const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
-          const savedStart = input.selectionStart ?? 0;
-          const savedEnd = input.selectionEnd ?? input.value.length;
-          hadExistingSelection = (savedStart !== savedEnd && savedEnd > savedStart);
-          
-          // Save the selection state
-          savedSelectionStart = savedStart;
-          savedSelectionEnd = savedEnd;
-          savedInputElement = currentInputElement;
+      saveSelection();
+      let selectedText = getSelectedText();
+
+      if (!selectedText && currentInputElement.tagName !== 'INPUT' && currentInputElement.tagName !== 'TEXTAREA') {
+        const range = document.createRange();
+        range.selectNodeContents(currentInputElement);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
         }
-      } else {
-        // For contenteditable, check if we have a saved selection
-        if (savedSelection && savedInputElement === currentInputElement) {
-          hadExistingSelection = true;
-        } else {
-          // Fallback: try to get current selection
-          const selectionRange = getSelectionRange(currentInputElement);
-          hadExistingSelection = !!selectionRange;
-          if (selectionRange) {
             saveSelection();
-          }
-        }
+        selectedText = getSelectedText();
       }
 
-      // If no existing selection, select all text
-      if (!hadExistingSelection) {
-        selectAllText(currentInputElement);
-        // Small delay to ensure selection is applied
-        await new Promise(resolve => setTimeout(resolve, 10));
-        
-        // Update saved selection to reflect "all selected"
-        if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
-          const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
-          savedSelectionStart = 0;
-          savedSelectionEnd = input.value.length;
-          savedInputElement = currentInputElement;
-        } else {
-          saveSelection();
-        }
-      }
-
-      // Get selected text using the saved selection state
-      let selectedText = '';
-      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
-        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
-        if (savedSelectionStart !== null && savedSelectionEnd !== null) {
-          selectedText = input.value.substring(savedSelectionStart, savedSelectionEnd).trim();
-        } else {
-          selectedText = input.value.trim();
-        }
-      } else {
-        const selectionRange = getSelectionRange(currentInputElement);
-        selectedText = getSelectedText(selectionRange, currentInputElement, hadExistingSelection);
-      }
-      
-      // Get selection range for positioning (after we've saved the text)
-      let selectionRange = getSelectionRange(currentInputElement);
-
-      // Get position for floating UI
-      let referenceElement: Element | VirtualElement;
-      
-      if (selectionRange) {
-        const rect = selectionRange.getBoundingClientRect();
-        referenceElement = {
-          getBoundingClientRect: () => rect,
+      const selectionRange = getSelectionRange();
+      const referenceElement: Element | VirtualElement = selectionRange ? {
+        getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
           getClientRects: () => selectionRange.getClientRects()
-        } as VirtualElement;
-      } else {
-        referenceElement = currentInputElement;
-      }
+      } as VirtualElement : currentInputElement;
 
-      // Create container for React component
       floatingPromptContainer = document.createElement('div');
-      floatingPromptContainer.id = 'floating-prompt-container';
-      floatingPromptContainer.style.position = 'fixed';
-      floatingPromptContainer.style.zIndex = '2147483647';
+      floatingPromptContainer.setAttribute('data-extension-prompt-container', 'true');
+      floatingPromptContainer.style.cssText = 'position: fixed; z-index: 2147483647; pointer-events: none; margin: 0; padding: 0; border: none; background: transparent;';
       document.body.appendChild(floatingPromptContainer);
 
-      // Calculate initial position
+      floatingPromptShadowRoot = floatingPromptContainer.attachShadow({ mode: 'open' });
+
+      const styleElement = document.createElement('style');
+      styleElement.textContent = `
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        .bg-white { background-color: #ffffff; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        .border { border-width: 1px; }
+        .border-gray-200 { border-color: #e5e7eb; }
+        .p-4 { padding: 1rem; }
+        .min-w-\\[320px\\] { min-width: 320px; }
+        .max-w-\\[500px\\] { max-width: 500px; }
+        .z-\\[2147483647\\] { z-index: 2147483647; }
+        .flex { display: flex; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .justify-end { justify-content: flex-end; }
+        .mb-3 { margin-bottom: 0.75rem; }
+        .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+        .font-medium { font-weight: 500; }
+        .text-gray-900 { color: #111827; }
+        .text-gray-400 { color: #9ca3af; }
+        .text-gray-600 { color: #4b5563; }
+        .text-gray-700 { color: #374151; }
+        .text-gray-500 { color: #6b7280; }
+        .text-red-600 { color: #dc2626; }
+        .hover\\:text-gray-600:hover { color: #4b5563; }
+        .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .bg-gray-50 { background-color: #f9fafb; }
+        .bg-red-50 { background-color: #fef2f2; }
+        .bg-gray-200 { background-color: #e5e7eb; }
+        .bg-gray-900 { background-color: #111827; }
+        .text-white { color: #ffffff; }
+        .border-red-200 { border-color: #fecaca; }
+        .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .text-xs { font-size: 0.75rem; line-height: 1rem; }
+        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .w-full { width: 100%; }
+        .resize-none { resize: none; }
+        .focus\\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+        .focus\\:ring-2:focus { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+        .focus\\:ring-blue-500:focus { --tw-ring-color: #3b82f6; }
+        .focus\\:border-transparent:focus { border-color: transparent; }
+        .gap-2 { gap: 0.5rem; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .disabled\\:bg-gray-200:disabled { background-color: #e5e7eb; }
+        .disabled\\:text-gray-500:disabled { color: #6b7280; }
+        .disabled\\:cursor-not-allowed:disabled { cursor: not-allowed; }
+        .disabled\\:hover\\:bg-gray-200:hover:disabled { background-color: #e5e7eb; }
+        .hover\\:bg-gray-800:hover { background-color: #1f2937; }
+        button { border: none; background: none; cursor: pointer; font: inherit; }
+        textarea { font: inherit; border: 1px solid #e5e7eb; border-radius: 0.375rem; }
+        textarea:focus { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); border-color: transparent; }
+      `;
+      floatingPromptShadowRoot.appendChild(styleElement);
+
+      const shadowHost = document.createElement('div');
+      shadowHost.style.cssText = 'position: relative; pointer-events: auto;';
+      floatingPromptShadowRoot.appendChild(shadowHost);
+
       let position = { x: 0, y: 0 };
       try {
-        const floatingElement = floatingPromptContainer;
-        const { x, y } = await computePosition(referenceElement, floatingElement, {
+        const { x, y } = await computePosition(referenceElement, shadowHost, {
           placement: 'top-start',
-          middleware: [
-            offset({ mainAxis: 8, crossAxis: 0 }),
-            flip({
-              fallbackPlacements: ['bottom-start', 'top-end', 'bottom-end']
-            }),
-            shift({ padding: 16 })
-          ]
+          middleware: [offset({ mainAxis: 8 }), flip({ fallbackPlacements: ['bottom-start', 'top-end', 'bottom-end'] }), shift({ padding: 16 })]
         });
         position = { x, y };
       } catch (error) {
-        // Fallback positioning - try top first
-        const elementRect = currentInputElement.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        const estimatedPopupHeight = 180; // Approximate height of popup
-        
-        // If near bottom, position above
-        if (elementRect.bottom + estimatedPopupHeight > viewportHeight - 20) {
-          position = { x: elementRect.left, y: elementRect.top - estimatedPopupHeight - 8 };
-        } else {
-          position = { x: elementRect.left, y: elementRect.bottom + 8 };
-        }
+        const rect = currentInputElement.getBoundingClientRect();
+        position = { x: rect.left, y: rect.bottom + 8 };
       }
 
-      // Render React component
-      reactRoot = createRoot(floatingPromptContainer);
+      shadowHost.style.left = `${position.x}px`;
+      shadowHost.style.top = `${position.y}px`;
+
+      reactRoot = createRoot(shadowHost);
       reactRoot.render(
         React.createElement(FloatingPrompt, {
           onClose: () => {
@@ -397,213 +298,118 @@ export default defineContentScript({
         })
       );
 
-      // Hide icon while floating UI is shown
-      if (currentIcon) {
-        currentIcon.style.display = 'none';
+      if (currentIconContainer) {
+        currentIconContainer.style.display = 'none';
       }
     }
 
-    async function positionIcon(element: HTMLElement, icon: HTMLElement) {
-      // Append to body if not already there
-      if (icon.parentNode !== document.body) {
-        document.body.appendChild(icon);
+    async function positionIcon(element: HTMLElement, iconContainer: HTMLElement) {
+      if (iconContainer.parentNode !== document.body) {
+        document.body.appendChild(iconContainer);
       }
 
-      // Small delay to ensure selection is stable
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const selectionRange = getSelectionRange(element);
-      
-      // Create a virtual element for the selection or use the input element
-      let referenceElement: Element | VirtualElement;
-      
-      if (selectionRange) {
-        // Create a virtual element based on the selection
-        const rect = selectionRange.getBoundingClientRect();
-        // Check if selection rect is valid (has dimensions)
-        if (rect.width > 0 || rect.height > 0) {
-          referenceElement = {
-            getBoundingClientRect: () => {
-              // Get fresh rect each time
-              const freshRect = selectionRange.getBoundingClientRect();
-              return freshRect;
-            },
+      const selectionRange = getSelectionRange();
+      const referenceElement: Element | VirtualElement = selectionRange && (selectionRange.getBoundingClientRect().width > 0 || selectionRange.getBoundingClientRect().height > 0) ? {
+        getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
             getClientRects: () => selectionRange.getClientRects()
-          } as VirtualElement;
-        } else {
-          // Invalid selection rect, fall back to element
-          referenceElement = element;
-        }
-      } else {
-        // Use the input element itself, positioned at top-left
-        referenceElement = element;
-      }
+      } as VirtualElement : element;
 
       try {
-        const { x, y } = await computePosition(referenceElement, icon, {
+        const { x, y } = await computePosition(referenceElement, iconContainer, {
           placement: selectionRange ? 'right-start' : 'top-start',
-          middleware: [
-            offset({ mainAxis: selectionRange ? 4 : 4, crossAxis: selectionRange ? 0 : 4 }),
-            flip(),
-            shift({ padding: 4 })
-          ]
+          middleware: [offset({ mainAxis: 4, crossAxis: selectionRange ? 0 : 4 }), flip(), shift({ padding: 4 })]
         });
-
-        icon.style.left = `${x}px`;
-        icon.style.top = `${y}px`;
+        iconContainer.style.left = `${x}px`;
+        iconContainer.style.top = `${y}px`;
       } catch (error) {
-        // Fallback positioning
-        const elementRect = element.getBoundingClientRect();
-        icon.style.left = `${elementRect.left + 4}px`;
-        icon.style.top = `${elementRect.top + 4}px`;
+        const rect = element.getBoundingClientRect();
+        iconContainer.style.left = `${rect.left + 4}px`;
+        iconContainer.style.top = `${rect.top + 4}px`;
       }
     }
 
-    async function updateIconPosition() {
-      if (!currentIcon || !currentInputElement || !document.contains(currentInputElement)) {
+    async function checkAndShowIcon() {
+      if (floatingPromptContainer) return;
+
+      const selectionRange = getSelectionRange();
+      if (!selectionRange) {
+        if (currentIconContainer) removeIcon();
         return;
       }
 
-      // Always show icon, regardless of text length
-      await positionIcon(currentInputElement, currentIcon);
-    }
-
-    function schedulePositionUpdate() {
-      // Throttle position updates to max once per 100ms
-      const now = Date.now();
-      if (now - lastPositionUpdate < 100) {
-        if (positionUpdateTimeout) {
-          clearTimeout(positionUpdateTimeout);
-        }
-        positionUpdateTimeout = window.setTimeout(() => {
-          updateIconPosition();
-          lastPositionUpdate = Date.now();
-        }, 100);
-        return;
-      }
-      lastPositionUpdate = now;
-      updateIconPosition();
-    }
-
-    async function checkAndShowIcon(element: HTMLElement) {
-      // Always show icon for text input elements, regardless of text length
-      if (!element || !document.contains(element)) {
+      const rect = selectionRange.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        if (currentIconContainer) removeIcon();
         return;
       }
 
-      // Check if this is a different element (for switching between multiple composers)
-      const isDifferentElement = currentInputElement !== element;
-      
-      if (!currentIcon || isDifferentElement) {
-        // Remove old icon and prompt when switching to a different element
-        if (isDifferentElement) {
+      const textInputElement = findTextInputElement(selectionRange.commonAncestorContainer);
+      if (!textInputElement) {
+        if (currentIconContainer) removeIcon();
+        return;
+      }
+
+      if (!currentIconContainer) {
+        currentIconContainer = createIcon();
+        currentInputElement = textInputElement;
+        document.body.appendChild(currentIconContainer);
+      } else if (currentInputElement !== textInputElement) {
           removeIcon();
-          removeFloatingPrompt();
-        }
-        currentIcon = createIcon();
-        currentInputElement = element;
-        document.body.appendChild(currentIcon);
-      }
-      
-      if (currentIcon.style.display === 'none') {
-        currentIcon.style.display = 'block';
-      }
-      
-      await updateIconPosition();
-    }
-
-    function findTextInputElement(element: HTMLElement): HTMLElement | null {
-      // Check if element itself is a text input
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        return element;
-      }
-      
-      // Check if element is contenteditable
-      if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
-        return element;
-      }
-      
-      // Check parent for contenteditable (Gmail sometimes has nested structure)
-      const contentEditableParent = element.closest('[contenteditable="true"]') as HTMLElement;
-      if (contentEditableParent) {
-        return contentEditableParent;
-      }
-      
-      return null;
-    }
-
-    async function handleInput(e: Event) {
-      const target = e.target as HTMLElement;
-      if (!target || target.hasAttribute('data-extension-icon') || target.closest('#floating-prompt-container')) {
-        return;
+        currentIconContainer = createIcon();
+        currentInputElement = textInputElement;
+        document.body.appendChild(currentIconContainer);
       }
 
-      const textInputElement = findTextInputElement(target);
-      if (textInputElement) {
-        await checkAndShowIcon(textInputElement);
-      }
-    }
-
-    async function handleFocus(e: Event) {
-      const target = e.target as HTMLElement;
-      if (!target || target.hasAttribute('data-extension-icon') || target.closest('#floating-prompt-container')) {
-        return;
-      }
-
-      const textInputElement = findTextInputElement(target);
-      if (textInputElement) {
-        // Use requestAnimationFrame to ensure element is ready
-        requestAnimationFrame(async () => {
-          // Always update icon position when focusing, even if same element
-          // This handles cases where the element might have moved (e.g., Gmail composer switching)
-          await checkAndShowIcon(textInputElement);
-        });
-      }
-    }
-
-    function handleBlur(e: Event) {
-      // Don't handle blur - let focus events handle switching between composers
-      // This prevents removing the icon when clicking between composer windows
+      await positionIcon(textInputElement, currentIconContainer);
     }
 
     function handleSelectionChange() {
-      // Only update if we have an active icon
-      if (currentIcon && currentInputElement && !floatingPromptContainer) {
-        // Save selection proactively for Gmail compatibility
-        if (currentInputElement) {
-          saveSelection();
-        }
-        schedulePositionUpdate();
+      if (selectionTimeout) clearTimeout(selectionTimeout);
+      selectionTimeout = window.setTimeout(checkAndShowIcon, 200);
+    }
+
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (target?.hasAttribute('data-extension-icon-container') || 
+          target?.closest('[data-extension-icon-container]') ||
+          target?.closest('[data-extension-prompt-container]') ||
+          (floatingPromptShadowRoot && floatingPromptShadowRoot.contains(target as Node))) {
+        return;
+      }
+      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+    }
+
+    function handleScroll() {
+      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+    }
+
+    function handleResize() {
+      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && floatingPromptContainer) {
+        e.preventDefault();
+        removeFloatingPrompt();
+        if (currentIconContainer) currentIconContainer.style.display = 'block';
       }
     }
 
     function handleClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      
-      // Don't close if clicking inside floating prompt
-      if (target.closest('#floating-prompt-container')) {
+      if (target?.closest('[data-extension-prompt-container]') ||
+          (floatingPromptShadowRoot && floatingPromptShadowRoot.contains(target as Node))) {
         return;
       }
 
-      // Check if clicking on a text input - show icon immediately
-      const textInputElement = findTextInputElement(target);
-      if (textInputElement) {
-        checkAndShowIcon(textInputElement);
-        return;
-      }
-
-      // Close floating prompt if clicking outside
       if (floatingPromptContainer && !floatingPromptContainer.contains(target)) {
         removeFloatingPrompt();
-        if (currentIcon) {
-          currentIcon.style.display = 'block';
-        }
+        if (currentIconContainer) currentIconContainer.style.display = 'block';
       }
 
-      // If clicking outside the icon and input, remove icon
-      if (currentIcon && 
-          target !== currentIcon && 
-          !currentIcon.contains(target) &&
+      if (currentIconContainer && 
+          target !== currentIconContainer && 
+          !currentIconContainer.contains(target) &&
           target !== currentInputElement &&
           !currentInputElement?.contains(target) &&
           !floatingPromptContainer) {
@@ -611,44 +417,20 @@ export default defineContentScript({
       }
     }
 
-    function handleKeyDown(e: KeyboardEvent) {
-      // Close floating prompt on Escape
-      if (e.key === 'Escape' && floatingPromptContainer) {
-        e.preventDefault();
-        removeFloatingPrompt();
-        if (currentIcon) {
-          currentIcon.style.display = 'block';
-        }
-      }
+    function setupEventListeners() {
+      document.addEventListener('selectionchange', handleSelectionChange);
+      document.addEventListener('mousedown', handleMouseDown, { passive: true });
+      window.addEventListener('scroll', handleScroll, { passive: true });
+      window.addEventListener('resize', handleResize, { passive: true });
+      document.addEventListener('keydown', handleKeyDown, { passive: false });
+      document.addEventListener('click', handleClick, { passive: true });
     }
 
-    // Listen for input and focus events on all text fields
-    document.addEventListener('input', handleInput, true);
-    document.addEventListener('focus', handleFocus, true);
-    document.addEventListener('blur', handleBlur, true);
-    document.addEventListener('selectionchange', handleSelectionChange);
-    document.addEventListener('click', handleClick, true);
-    document.addEventListener('keydown', handleKeyDown, true);
-    
-    // Throttle scroll and resize events
-    let scrollTimeout: number | null = null;
-    window.addEventListener('scroll', () => {
-      if (scrollTimeout) clearTimeout(scrollTimeout);
-      scrollTimeout = window.setTimeout(() => {
-        if (currentIcon && currentInputElement && !floatingPromptContainer) {
-          schedulePositionUpdate();
-        }
-      }, 50);
-    }, { passive: true });
-    
-    let resizeTimeout: number | null = null;
-    window.addEventListener('resize', () => {
-      if (resizeTimeout) clearTimeout(resizeTimeout);
-      resizeTimeout = window.setTimeout(() => {
-        if (currentIcon && currentInputElement && !floatingPromptContainer) {
-          schedulePositionUpdate();
-        }
-      }, 100);
-    }, { passive: true });
+    // Wait for page to be ready, then initialize
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => setTimeout(setupEventListeners, 500));
+    } else {
+      setTimeout(setupEventListeners, 500);
+    }
   },
 });
