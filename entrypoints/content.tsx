@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { computePosition, offset, flip, shift, type VirtualElement } from '@floating-ui/dom';
 import FloatingPrompt from './components/FloatingPrompt';
+import { StreamingFooter } from './components/StreamingFooter'; // Import StreamingFooter
+import * as selectionManager from './utils/selectionManager'; // Import selectionManager
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -19,6 +21,12 @@ export default defineContentScript({
     let savedInputElement: HTMLElement | null = null;
     let savedSelectionStart: number | null = null;
     let savedSelectionEnd: number | null = null;
+
+    // New state for StreamingFooter
+    let streamingFooterContainer: HTMLElement | null = null;
+    let streamingFooterRoot: ReturnType<typeof createRoot> | null = null;
+    let lastSelectionSnapshot: selectionManager.SelectionSnapshot | null = null;
+
 
     function createIcon(): HTMLElement {
       const container = document.createElement('div');
@@ -174,6 +182,67 @@ export default defineContentScript({
       restoreSelection();
     }
 
+    // --- New functions for StreamingFooter ---
+    function showStreamingFooter(prompt: string, initialSelectedText: string) {
+      if (streamingFooterContainer) return; // Already showing
+
+      // Save the current selection snapshot before the UI covers it
+      lastSelectionSnapshot = selectionManager.snapshotSelection();
+      if (!lastSelectionSnapshot) {
+        console.error("No valid selection to snap for streaming.");
+        return;
+      }
+
+      streamingFooterContainer = document.createElement('div');
+      streamingFooterContainer.setAttribute('data-extension-streaming-footer', 'true');
+      document.body.appendChild(streamingFooterContainer);
+      
+      const shadowRoot = streamingFooterContainer.attachShadow({ mode: 'open' });
+      const shadowHost = document.createElement('div');
+      shadowRoot.appendChild(shadowHost);
+
+      const fullPrompt = `Selected Text:\n---\n${initialSelectedText}\n---\n\nUser's instruction: "${prompt}"\n\nRewrite the selected text based on the instruction. Output only the rewritten text, without any additional commentary.`;
+
+      browser.runtime.sendMessage({
+        type: 'stream-ollama-chat',
+        payload: {
+          model: 'llama3.2',
+          messages: [{ role: 'user', content: fullPrompt }],
+        },
+      });
+
+      streamingFooterRoot = createRoot(shadowHost);
+      streamingFooterRoot.render(
+        React.createElement(StreamingFooter, {
+          onClose: () => {
+            hideStreamingFooter();
+            removeIcon(); // Remove icon after insertion
+          },
+          onInsert: (newText: string) => {
+            selectionManager.restoreSelection(newText, lastSelectionSnapshot);
+            hideStreamingFooter();
+            removeIcon(); // Remove icon after insertion
+          },
+          onStop: () => {
+            browser.runtime.sendMessage({ type: 'stop-ollama-stream' });
+          },
+        })
+      );
+    }
+
+    function hideStreamingFooter() {
+      if (streamingFooterRoot) {
+        streamingFooterRoot.unmount();
+        streamingFooterRoot = null;
+      }
+      if (streamingFooterContainer) {
+        streamingFooterContainer.remove();
+        streamingFooterContainer = null;
+      }
+    }
+    // --- End New functions for StreamingFooter ---
+
+
     async function handleIconClick() {
       if (!currentInputElement) return;
 
@@ -193,7 +262,7 @@ export default defineContentScript({
       }
 
       const selectionRange = getSelectionRange();
-      const referenceElement: Element | VirtualElement = selectionRange ? {
+      const referenceElement: Element | VirtualElement = selectionRange && (selectionRange.getBoundingClientRect().width > 0 || selectionRange.getBoundingClientRect().height > 0) ? {
         getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
           getClientRects: () => selectionRange.getClientRects()
       } as VirtualElement : currentInputElement;
@@ -214,9 +283,9 @@ export default defineContentScript({
         .border { border-width: 1px; }
         .border-gray-200 { border-color: #e5e7eb; }
         .p-4 { padding: 1rem; }
-        .min-w-\\[320px\\] { min-width: 320px; }
-        .max-w-\\[500px\\] { max-width: 500px; }
-        .z-\\[2147483647\\] { z-index: 2147483647; }
+        .min-w-\[320px\] { min-width: 320px; }
+        .max-w-\[500px\] { max-width: 500px; }
+        .z-\[2147483647\] { z-index: 2147483647; }
         .flex { display: flex; }
         .items-center { align-items: center; }
         .justify-between { justify-content: space-between; }
@@ -230,7 +299,7 @@ export default defineContentScript({
         .text-gray-700 { color: #374151; }
         .text-gray-500 { color: #6b7280; }
         .text-red-600 { color: #dc2626; }
-        .hover\\:text-gray-600:hover { color: #4b5563; }
+        .hover\:text-gray-600:hover { color: #4b5563; }
         .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
         .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
         .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
@@ -245,17 +314,17 @@ export default defineContentScript({
         .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .w-full { width: 100%; }
         .resize-none { resize: none; }
-        .focus\\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
-        .focus\\:ring-2:focus { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
-        .focus\\:ring-blue-500:focus { --tw-ring-color: #3b82f6; }
-        .focus\\:border-transparent:focus { border-color: transparent; }
+        .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+        .focus\:ring-2:focus { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+        .focus\:ring-blue-500:focus { --tw-ring-color: #3b82f6; }
+        .focus\:border-transparent:focus { border-color: transparent; }
         .gap-2 { gap: 0.5rem; }
         .px-4 { padding-left: 1rem; padding-right: 1rem; }
-        .disabled\\:bg-gray-200:disabled { background-color: #e5e7eb; }
-        .disabled\\:text-gray-500:disabled { color: #6b7280; }
-        .disabled\\:cursor-not-allowed:disabled { cursor: not-allowed; }
-        .disabled\\:hover\\:bg-gray-200:hover:disabled { background-color: #e5e7eb; }
-        .hover\\:bg-gray-800:hover { background-color: #1f2937; }
+        .disabled\:bg-gray-200:disabled { background-color: #e5e7eb; }
+        .disabled\:text-gray-500:disabled { color: #6b7280; }
+        .disabled\:cursor-not-allowed:disabled { cursor: not-allowed; }
+        .disabled\:hover\:bg-gray-200:hover:disabled { background-color: #e5e7eb; }
+        .hover\:bg-gray-800:hover { background-color: #1f2937; }
         button { border: none; background: none; cursor: pointer; font: inherit; }
         textarea { font: inherit; border: 1px solid #e5e7eb; border-radius: 0.375rem; }
         textarea:focus { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); border-color: transparent; }
@@ -289,9 +358,17 @@ export default defineContentScript({
             removeIcon();
           },
           onSend: (command: string) => {
-            console.log('AI command:', command);
-            removeFloatingPrompt();
-            removeIcon();
+            // ORIGINAL: console.log('AI command:', command);
+            removeFloatingPrompt(); // Close the prompt
+            // Capture the snapshot again right before showing the footer
+            const currentSnapshot = selectionManager.snapshotSelection();
+            if (currentSnapshot) {
+                lastSelectionSnapshot = currentSnapshot;
+                showStreamingFooter(command, selectedText); // Show the new streaming footer
+            } else {
+                console.error("Could not capture selection for streaming. Aborting.");
+                removeIcon();
+            }
           },
           position,
           selectedText
@@ -329,7 +406,7 @@ export default defineContentScript({
     }
 
     async function checkAndShowIcon() {
-      if (floatingPromptContainer) return;
+      if (floatingPromptContainer || streamingFooterContainer) return; // Don't show icon if prompt or footer is already open
 
       const selectionRange = getSelectionRange();
       if (!selectionRange) {
@@ -373,31 +450,38 @@ export default defineContentScript({
       if (target?.hasAttribute('data-extension-icon-container') || 
           target?.closest('[data-extension-icon-container]') ||
           target?.closest('[data-extension-prompt-container]') ||
+          target?.closest('[data-extension-streaming-footer]') || // Added check for streaming footer
           (floatingPromptShadowRoot && floatingPromptShadowRoot.contains(target as Node))) {
         return;
       }
-      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+      if (currentIconContainer && !floatingPromptContainer && !streamingFooterContainer) removeIcon(); // Only remove if no UI is open
     }
 
     function handleScroll() {
-      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+      if (currentIconContainer && !floatingPromptContainer && !streamingFooterContainer) removeIcon(); // Only remove if no UI is open
     }
 
     function handleResize() {
-      if (currentIconContainer && !floatingPromptContainer) removeIcon();
+      if (currentIconContainer && !floatingPromptContainer && !streamingFooterContainer) removeIcon(); // Only remove if no UI is open
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && floatingPromptContainer) {
+      if (e.key === 'Escape') { // Consolidated escape key logic
         e.preventDefault();
-        removeFloatingPrompt();
-        if (currentIconContainer) currentIconContainer.style.display = 'block';
+        if (streamingFooterContainer) {
+            hideStreamingFooter();
+            removeIcon(); // Also remove icon if streaming footer is closed
+        } else if (floatingPromptContainer) {
+            removeFloatingPrompt();
+            if (currentIconContainer) currentIconContainer.style.display = 'block';
+        }
       }
     }
 
     function handleClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
       if (target?.closest('[data-extension-prompt-container]') ||
+          target?.closest('[data-extension-streaming-footer]') || // Added check for streaming footer
           (floatingPromptShadowRoot && floatingPromptShadowRoot.contains(target as Node))) {
         return;
       }
@@ -406,13 +490,19 @@ export default defineContentScript({
         removeFloatingPrompt();
         if (currentIconContainer) currentIconContainer.style.display = 'block';
       }
+      // Added logic for closing streaming footer on outside click
+      if (streamingFooterContainer && !streamingFooterContainer.contains(target)) {
+        hideStreamingFooter();
+        removeIcon();
+      }
 
       if (currentIconContainer && 
           target !== currentIconContainer && 
           !currentIconContainer.contains(target) &&
           target !== currentInputElement &&
           !currentInputElement?.contains(target) &&
-          !floatingPromptContainer) {
+          !floatingPromptContainer &&
+          !streamingFooterContainer) { // Only remove if no UI is open
         removeIcon();
       }
     }

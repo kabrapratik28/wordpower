@@ -13,6 +13,7 @@ export default defineConfig({
         matches: ['<all_urls>'],
       },
     ],
+    host_permissions: ['http://127.0.0.1:11434/'],
   },
   vite: () => ({
     plugins: [tailwindcss()],
