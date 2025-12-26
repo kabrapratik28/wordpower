@@ -32,7 +32,7 @@ export default defineContentScript({
           width: ${iconSize}px; height: ${iconSize}px; cursor: pointer;
           pointer-events: auto; user-select: none; border: none; outline: none;
           display: block; margin: 0; padding: 0; will-change: transform;
-          transition: opacity 0.2s;
+          transition: opacity 0.2s; border-radius: 50%; object-fit: cover;
         }
         .extension-icon:hover { opacity: 0.8; }
       `;
