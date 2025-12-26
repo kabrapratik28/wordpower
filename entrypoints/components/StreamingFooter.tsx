@@ -27,7 +27,7 @@ export function StreamingFooter({ onInsert, onClose, onStop }: StreamingFooterPr
         if (isStreaming) setStreamedText((prev) => prev + message.payload.content);
         if (message.payload.done) setIsStreaming(false);
       } else if (message.type === 'ollama-error') {
-        setError(`Ollama Error: ${message.payload.message}. Is Ollama running?`);
+        setError(`Error: ${message.payload.message}`);
         setIsStreaming(false);
       }
     };

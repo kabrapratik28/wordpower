@@ -58,7 +58,19 @@ export default defineBackground(() => {
             sendMessageToTab(tabId, { type: 'ollama-chunk', payload: { content: chunk.message.content, done: chunk.done } });
           }
         } catch (error: any) {
-          sendMessageToTab(tabId, { type: 'ollama-error', payload: { message: error.message || "An unknown error occurred." } });
+          // This is the crucial part: catch ANY error from the above block
+          // and send a detailed error message to the UI.
+          let errorMessage = "An unknown error occurred.";
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          }
+          if (errorMessage.includes('fetch')) {
+            errorMessage = 'Connection to Ollama failed. Is it running and is CORS configured correctly?'
+          }
+          sendMessageToTab(tabId, { 
+            type: 'ollama-error', 
+            payload: { message: errorMessage }
+          });
         } finally {
           abortControllers.delete(tabId);
         }
