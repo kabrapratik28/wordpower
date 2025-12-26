@@ -5,9 +5,33 @@ interface FloatingPromptProps {
   onClose: () => void;
   onSend: (command: string) => void;
   position: { x: number; y: number };
+  selectedText?: string;
 }
 
-export default function FloatingPrompt({ onClose, onSend, position }: FloatingPromptProps) {
+function formatSelectedText(text: string, maxLength: number = 120): string {
+  // Replace newlines with spaces and normalize whitespace
+  let formatted = text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  
+  if (formatted.length <= maxLength) {
+    return formatted;
+  }
+  
+  // If overflow, show beginning + "..." + ending
+  const ellipsis = '...';
+  const ellipsisLength = ellipsis.length;
+  const availableLength = maxLength - ellipsisLength;
+  
+  // Split available length roughly 60/40 between start and end
+  const startLength = Math.floor(availableLength * 0.6);
+  const endLength = availableLength - startLength;
+  
+  const startPart = formatted.substring(0, startLength).trim();
+  const endPart = formatted.substring(formatted.length - endLength).trim();
+  
+  return `${startPart}${ellipsis}${endPart}`;
+}
+
+export default function FloatingPrompt({ onClose, onSend, position, selectedText }: FloatingPromptProps) {
   const [command, setCommand] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -15,6 +39,13 @@ export default function FloatingPrompt({ onClose, onSend, position }: FloatingPr
     // Focus textarea when component mounts
     textareaRef.current?.focus();
   }, []);
+
+  // Debug: log selectedText to verify it's being passed
+  useEffect(() => {
+    if (selectedText) {
+      console.log('Selected text received:', selectedText);
+    }
+  }, [selectedText]);
 
   const handleSend = () => {
     if (command.trim()) {
@@ -53,6 +84,16 @@ export default function FloatingPrompt({ onClose, onSend, position }: FloatingPr
           <X size={16} />
         </button>
       </div>
+
+      {selectedText && (
+        <div className="mb-3">
+          <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200">
+            <p className="text-xs text-gray-600 font-mono truncate" title={selectedText}>
+              {formatSelectedText(selectedText)}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="mb-3">
         <textarea

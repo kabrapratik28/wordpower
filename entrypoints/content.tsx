@@ -21,6 +21,8 @@ export default defineContentScript({
     let lastPositionUpdate = 0;
     let savedSelection: Range | null = null;
     let savedInputElement: HTMLElement | null = null;
+    let savedSelectionStart: number | null = null;
+    let savedSelectionEnd: number | null = null;
 
     function createIcon(): HTMLElement {
       const icon = document.createElement('img');
@@ -115,15 +117,44 @@ export default defineContentScript({
     }
 
     function saveSelection() {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0 && currentInputElement) {
-        savedSelection = selection.getRangeAt(0).cloneRange();
+      if (!currentInputElement) return;
+      
+      // For INPUT/TEXTAREA, save selectionStart/selectionEnd
+      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
+        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+        savedSelectionStart = input.selectionStart;
+        savedSelectionEnd = input.selectionEnd;
         savedInputElement = currentInputElement;
+        savedSelection = null;
+      } else {
+        // For contenteditable, save Range
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          savedSelection = selection.getRangeAt(0).cloneRange();
+          savedInputElement = currentInputElement;
+          savedSelectionStart = null;
+          savedSelectionEnd = null;
+        }
       }
     }
 
     function restoreSelection() {
-      if (savedSelection && savedInputElement && document.contains(savedInputElement)) {
+      if (!savedInputElement || !document.contains(savedInputElement)) {
+        savedSelection = null;
+        savedInputElement = null;
+        savedSelectionStart = null;
+        savedSelectionEnd = null;
+        return;
+      }
+
+      // For INPUT/TEXTAREA, restore using selectionStart/selectionEnd
+      if (savedInputElement.tagName === 'INPUT' || savedInputElement.tagName === 'TEXTAREA') {
+        if (savedSelectionStart !== null && savedSelectionEnd !== null) {
+          const input = savedInputElement as HTMLInputElement | HTMLTextAreaElement;
+          input.setSelectionRange(savedSelectionStart, savedSelectionEnd);
+        }
+      } else if (savedSelection) {
+        // For contenteditable, restore using Range
         const selection = window.getSelection();
         if (selection) {
           selection.removeAllRanges();
@@ -135,8 +166,11 @@ export default defineContentScript({
           }
         }
       }
+      
       savedSelection = null;
       savedInputElement = null;
+      savedSelectionStart = null;
+      savedSelectionEnd = null;
     }
 
     function selectAllText(element: HTMLElement) {
@@ -154,6 +188,54 @@ export default defineContentScript({
       }
     }
 
+    function getSelectedText(range: Range | null, element: HTMLElement, hasExistingSelection: boolean): string {
+      // For INPUT/TEXTAREA, get selected text from the element's selection
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        const input = element as HTMLInputElement | HTMLTextAreaElement;
+        const start = input.selectionStart ?? 0;
+        const end = input.selectionEnd ?? input.value.length;
+        
+        // If there was an existing selection, only return the selected portion
+        if (hasExistingSelection) {
+          const selected = input.value.substring(start, end);
+          return selected.trim();
+        }
+        
+        // If we selected all text (no existing selection), return all text
+        if (start === 0 && end === input.value.length) {
+          return input.value.trim();
+        }
+        
+        // Otherwise return the selected portion
+        const selected = input.value.substring(start, end);
+        return selected.trim();
+      }
+      
+      // For contenteditable, use the range if available
+      if (range) {
+        const text = range.toString().trim();
+        if (text) {
+          // If there was an existing selection, return only the range text
+          if (hasExistingSelection) {
+            return text;
+          }
+          // If we selected all, check if range covers entire element
+          const elementText = element.textContent?.trim() || '';
+          if (text === elementText) {
+            return text; // All text was selected
+          }
+          return text; // Partial selection
+        }
+      }
+      
+      // Only get all text if there was no existing selection
+      if (!hasExistingSelection && element.isContentEditable) {
+        return element.textContent?.trim() || '';
+      }
+      
+      return '';
+    }
+
     function removeFloatingPrompt() {
       if (reactRoot) {
         reactRoot.unmount();
@@ -169,17 +251,64 @@ export default defineContentScript({
     async function handleIconClick() {
       if (!currentInputElement) return;
 
-      // Check if there's a selection, if not, select all text
-      let selectionRange = getSelectionRange(currentInputElement);
-      if (!selectionRange) {
-        // No selection, select all text
+      // Save the current selection state IMMEDIATELY before any operations
+      // This is critical because clicking might clear the selection
+      let hadExistingSelection = false;
+      let savedStart = null;
+      let savedEnd = null;
+      
+      // For INPUT/TEXTAREA, save selectionStart/selectionEnd BEFORE anything else
+      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
+        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+        savedStart = input.selectionStart ?? 0;
+        savedEnd = input.selectionEnd ?? input.value.length;
+        hadExistingSelection = (savedStart !== savedEnd && savedEnd > savedStart);
+        
+        // Save the selection state
+        savedSelectionStart = savedStart;
+        savedSelectionEnd = savedEnd;
+        savedInputElement = currentInputElement;
+      } else {
+        // For contenteditable, check if there's a range
+        const selectionRange = getSelectionRange(currentInputElement);
+        hadExistingSelection = !!selectionRange;
+        if (selectionRange) {
+          saveSelection();
+        }
+      }
+
+      // If no existing selection, select all text
+      if (!hadExistingSelection) {
         selectAllText(currentInputElement);
-        // Get the newly created selection
-        selectionRange = getSelectionRange(currentInputElement);
+        // Small delay to ensure selection is applied
+        await new Promise(resolve => setTimeout(resolve, 10));
+        
+        // Update saved selection to reflect "all selected"
+        if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
+          const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+          savedSelectionStart = 0;
+          savedSelectionEnd = input.value.length;
+        } else {
+          saveSelection();
+        }
+      }
+
+      // Get selected text using the saved selection state
+      let selectedText = '';
+      if (currentInputElement.tagName === 'INPUT' || currentInputElement.tagName === 'TEXTAREA') {
+        const input = currentInputElement as HTMLInputElement | HTMLTextAreaElement;
+        if (savedSelectionStart !== null && savedSelectionEnd !== null) {
+          selectedText = input.value.substring(savedSelectionStart, savedSelectionEnd).trim();
+        } else {
+          selectedText = input.value.trim();
+        }
+      } else {
+        const selectionRange = getSelectionRange(currentInputElement);
+        selectedText = getSelectedText(selectionRange, currentInputElement, hadExistingSelection);
       }
       
-      // Save the selection (either existing or newly selected)
-      saveSelection();
+      // Get selection range for positioning (after we've saved the text)
+      let selectionRange = getSelectionRange(currentInputElement);
 
       // Get position for floating UI
       let referenceElement: Element | VirtualElement;
@@ -243,7 +372,8 @@ export default defineContentScript({
             removeFloatingPrompt();
             removeIcon();
           },
-          position
+          position,
+          selectedText
         })
       );
 
