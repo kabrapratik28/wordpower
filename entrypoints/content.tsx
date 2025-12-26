@@ -4,6 +4,7 @@ import { computePosition, offset, flip, shift, type VirtualElement } from '@floa
 import FloatingPrompt from './components/FloatingPrompt';
 import { StreamingFooter } from './components/StreamingFooter';
 import * as selectionManager from './utils/selectionManager';
+import { DEFAULT_MODEL, buildFinalPrompt } from './utils/constants';
 
 type UIState = 'hidden' | 'prompt' | 'streaming';
 
@@ -21,11 +22,81 @@ export default defineContentScript({
     let lastPosition: { x: number; y: number } | null = null;
     let lastSelectedText: string = '';
 
+    // --- Icon & Tooltip state ---
+    const iconSize = 18;
+    let currentIconContainer: HTMLElement | null = null;
+    let tooltipContainer: HTMLElement | null = null;
+    let selectionTimeout: number | null = null;
+    
+    // --- Tooltip ---
+    function showTooltip() {
+      if (tooltipContainer || !currentIconContainer) return;
+
+      tooltipContainer = document.createElement('div');
+      tooltipContainer.style.cssText = 'position: fixed; background-color: #333; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; z-index: 2147483647; pointer-events: none;';
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      tooltipContainer.textContent = `Improve with AI (${isMac ? '⌘' : 'Ctrl'}+M)`;
+      document.body.appendChild(tooltipContainer);
+      
+      computePosition(currentIconContainer, tooltipContainer, {
+        placement: 'top',
+        middleware: [offset(8), flip(), shift({ padding: 5 })],
+      }).then(({ x, y }) => {
+        Object.assign(tooltipContainer!.style, { left: `${x}px`, top: `${y}px` });
+      });
+    }
+
+    function hideTooltip() {
+      if (tooltipContainer) {
+        tooltipContainer.remove();
+        tooltipContainer = null;
+      }
+    }
+
+    // --- Icon ---
+    function createIcon(): HTMLElement {
+      const container = document.createElement('div');
+      container.style.cssText = `position: fixed; z-index: 2147483647; width: ${iconSize}px; height: ${iconSize}px; pointer-events: none;`;
+
+      const shadow = container.attachShadow({ mode: 'open' });
+      const icon = document.createElement('img');
+      icon.src = browser.runtime.getURL('icon/32.png');
+      icon.style.cssText = 'width: 100%; height: 100%; cursor: pointer; pointer-events: auto; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
+      
+      icon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showUIPrompt();
+      });
+      
+      icon.addEventListener('mouseenter', showTooltip);
+      icon.addEventListener('mouseleave', hideTooltip);
+
+      shadow.appendChild(icon);
+      return container;
+    }
+    
+    function removeIcon() {
+      hideTooltip();
+      if (currentIconContainer) {
+        currentIconContainer.remove();
+        currentIconContainer = null;
+      }
+    }
+    
+    function positionIcon(referenceElement: Element | VirtualElement) {
+        if (!currentIconContainer) return;
+        computePosition(referenceElement, currentIconContainer, {
+            placement: 'right-start',
+            middleware: [offset({ mainAxis: 4, crossAxis: 4 }), flip(), shift({ padding: 4 })]
+        }).then(({x, y}) => {
+            Object.assign(currentIconContainer!.style, { left: `${x}px`, top: `${y}px` });
+        });
+    }
+
     // --- Core UI Management ---
 
     function renderUI() {
-      if (uiState === 'hidden' || !uiContainer || !uiShadowRoot || !uiReactRoot) {
-        // If UI is hidden or container doesn't exist, do nothing or cleanup.
+      if (uiState === 'hidden' || !uiContainer) {
         if (uiContainer) uiContainer.remove();
         uiContainer = null;
         uiShadowRoot = null;
@@ -34,73 +105,60 @@ export default defineContentScript({
         return;
       }
       
-      // Ensure container is in the body and positioned
       if (!uiContainer.isConnected) document.body.appendChild(uiContainer);
       if (lastPosition) {
-        Object.assign(uiContainer.style, {
-          left: `${lastPosition.x}px`,
-          top: `${lastPosition.y}px`,
-        });
+        Object.assign(uiContainer.style, { left: `${lastPosition.x}px`, top: `${lastPosition.y}px` });
       }
 
       let componentToRender;
       if (uiState === 'prompt') {
-        componentToRender = React.createElement(FloatingPrompt, {
-          selectedText: lastSelectedText,
-          onSend: handleSend,
-          onClose: handleClose,
-        });
+        componentToRender = React.createElement(FloatingPrompt, { selectedText: lastSelectedText, onSend: handleSend, onClose: handleClose, });
       } else if (uiState === 'streaming') {
-        componentToRender = React.createElement(StreamingFooter, {
-          onInsert: handleInsert,
-          onClose: handleClose,
-          onStop: handleStop,
-        });
+        componentToRender = React.createElement(StreamingFooter, { onInsert: handleInsert, onClose: handleClose, onStop: handleStop, });
       }
-
-      uiReactRoot.render(componentToRender);
+      if(uiReactRoot) uiReactRoot.render(componentToRender);
     }
     
-    function createUIContainer(referenceElement: Element | VirtualElement) {
-        if (uiContainer) return; // Already exists
-
-        // Create the host container for the shadow DOM
+    function createUIContainer() {
+        if (uiContainer) return; 
         uiContainer = document.createElement('div');
         uiContainer.setAttribute('data-extension-ui-container', 'true');
         uiContainer.style.cssText = 'position: fixed; z-index: 2147483647; pointer-events: auto;';
-
         uiShadowRoot = uiContainer.attachShadow({ mode: 'open' });
-
         const styleElement = document.createElement('style');
-        // Simple styles for card layout, will be used by both components
-        styleElement.textContent = `
-          * { box-sizing: border-box; }
-          .wordpower-card {
-            background-color: #ffffff;
-            border-radius: 0.5rem;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            border: 1px solid #e5e7eb;
-            padding: 1rem;
-            min-width: 380px;
-            max-width: 500px;
-            font-family: sans-serif;
-          }
-        `;
+        styleElement.textContent = `.wordpower-card { background-color: #ffffff; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #e5e7eb; padding: 1rem; min-width: 380px; max-width: 500px; font-family: sans-serif; }`;
         uiShadowRoot.appendChild(styleElement);
-        
         const shadowHost = document.createElement('div');
         uiShadowRoot.appendChild(shadowHost);
-
         uiReactRoot = createRoot(shadowHost);
+    }
 
-        // Calculate and store position
-        computePosition(referenceElement, uiContainer, {
-          placement: 'top-start',
-          middleware: [offset({ mainAxis: 8 }), flip(), shift({ padding: 16 })]
-        }).then(({ x, y }) => {
-          lastPosition = { x, y };
-          renderUI(); // Re-render to apply position
-        });
+    function showUIPrompt() {
+        const snapshot = selectionManager.snapshotSelection();
+        const selectedText = snapshot ? selectionManager.getSelectionText(snapshot) : '';
+
+        if (snapshot && selectedText.trim()) {
+            lastSelectionSnapshot = snapshot;
+            lastSelectedText = selectedText;
+            
+            const selectionRange = window.getSelection()?.getRangeAt(0);
+            const referenceElement: Element | VirtualElement = selectionRange ? {
+                getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
+                getClientRects: () => selectionRange.getClientRects()
+            } as VirtualElement : snapshot.activeElement;
+            
+            removeIcon(); // Hide icon when prompt opens
+            createUIContainer();
+            
+            computePosition(referenceElement, uiContainer!, {
+                placement: 'top-start',
+                middleware: [offset({ mainAxis: 8 }), flip(), shift({ padding: 16 })]
+            }).then(({ x, y }) => {
+                lastPosition = { x, y };
+                uiState = 'prompt';
+                renderUI();
+            });
+        }
     }
 
     // --- Action Handlers ---
@@ -108,11 +166,10 @@ export default defineContentScript({
     function handleSend(command: string) {
       if (!lastSelectionSnapshot) return;
       uiState = 'streaming';
-      const fullPrompt = `Selected Text:\n---\n${lastSelectedText}\n---\n\nUser's instruction: "${command}"\n\nRewrite the selected text based on the instruction. Output only the rewritten text, without any additional commentary.`;
-      
+      const fullPrompt = buildFinalPrompt(lastSelectedText, command);
       browser.runtime.sendMessage({
         type: 'stream-ollama-chat',
-        payload: { model: 'llama3.2', messages: [{ role: 'user', content: fullPrompt }] },
+        payload: { model: DEFAULT_MODEL, messages: [{ role: 'user', content: fullPrompt }] },
       });
       renderUI();
     }
@@ -134,48 +191,43 @@ export default defineContentScript({
       renderUI();
     }
 
-    // --- Keyboard & Event Listeners ---
-    
-    function getSelectionRange(): Range | null {
-      const selection = window.getSelection();
-      if (!selection?.rangeCount) return null;
-      const range = selection.getRangeAt(0);
-      return range.collapsed ? null : range;
+    // --- Event Listeners ---
+
+    function checkAndShowIcon() {
+        if (uiState !== 'hidden') return;
+        const snapshot = selectionManager.snapshotSelection();
+        const selText = snapshot ? selectionManager.getSelectionText(snapshot) : '';
+        if(selText.trim().length > 2) {
+            if(!currentIconContainer) {
+                currentIconContainer = createIcon();
+                document.body.appendChild(currentIconContainer);
+            }
+            const range = window.getSelection()?.getRangeAt(0);
+            positionIcon(range || snapshot!.activeElement);
+        } else {
+            removeIcon();
+        }
     }
 
+    function handleSelectionChange() {
+        if (uiState !== 'hidden') {
+            removeIcon();
+            return;
+        }
+        if (selectionTimeout) clearTimeout(selectionTimeout);
+        selectionTimeout = window.setTimeout(checkAndShowIcon, 200);
+    }
+    
     function handleGlobalKeyDown(e: KeyboardEvent) {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifier = isMac ? e.metaKey : e.ctrlKey;
 
-      // Cmd/Ctrl+M to toggle the prompt
       if (modifier && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         e.stopPropagation();
-        
-        if (uiState === 'hidden') {
-          const snapshot = selectionManager.snapshotSelection();
-          const selectedText = snapshot ? selectionManager.getSelectionText(snapshot) : '';
-
-          if (snapshot && selectedText.trim()) {
-            lastSelectionSnapshot = snapshot;
-            lastSelectedText = selectedText;
-            
-            const selectionRange = getSelectionRange();
-            const referenceElement: Element | VirtualElement = selectionRange ? {
-              getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
-              getClientRects: () => selectionRange.getClientRects()
-            } as VirtualElement : snapshot.activeElement;
-            
-            createUIContainer(referenceElement);
-            uiState = 'prompt';
-            renderUI();
-          }
-        } else {
-          handleClose();
-        }
+        uiState === 'hidden' ? showUIPrompt() : handleClose();
       }
       
-      // Escape to close
       if (e.key === 'Escape' && uiState !== 'hidden') {
         e.preventDefault();
         e.stopPropagation();
@@ -183,11 +235,25 @@ export default defineContentScript({
       }
     }
     
+    // Hide icon if user clicks away
+    function handleMouseDown(e: MouseEvent) {
+        const target = e.target as HTMLElement;
+        if (uiContainer && uiContainer.contains(target)) return;
+        if (currentIconContainer && currentIconContainer.shadowRoot?.contains(target)) return;
+        
+        if (uiState === 'hidden') removeIcon();
+    }
+
+    document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('keydown', handleGlobalKeyDown, true);
-    // Cleanup listener on script unload
+    document.addEventListener('mousedown', handleMouseDown, true);
+    
     return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
       document.removeEventListener('keydown', handleGlobalKeyDown, true);
-      handleClose(); // Ensure UI is removed
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      handleClose();
+      removeIcon();
     };
   },
 });

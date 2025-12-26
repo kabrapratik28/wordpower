@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CornerDownLeft, X } from 'lucide-react';
+import { PROMPT_PLACEHOLDER } from '../utils/constants';
 
 interface FloatingPromptProps {
   onClose: () => void;
@@ -57,7 +58,7 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
         value={command}
         onChange={(e) => setCommand(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="e.g., 'Make this more formal' or 'Fix grammar'"
+        placeholder={PROMPT_PLACEHOLDER}
         style={{ width: '100%', padding: '8px', fontSize: '0.9rem', border: '1px solid #d1d5db', borderRadius: '0.375rem', resize: 'none', marginBottom: '12px' }}
         rows={2}
       />
