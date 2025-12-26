@@ -1,8 +1,14 @@
-// entrypoints/constants.ts
-
 export const DEFAULT_MODEL = 'llama3.2';
 
 export const PROMPT_PLACEHOLDER = "e.g., 'Make this more formal' or 'Fix grammar'";
+
+export const PRESET_PROMPTS = [
+  'Fix spelling and grammar',
+  'Make this more formal',
+  'Make this more casual',
+  'Summarize this text',
+  'Translate to Spanish',
+];
 
 // This is the core instruction set for the AI model.
 export const SYSTEM_PROMPT_IMPROVE_WRITING = `You are an expert AI writing assistant. Your task is to revise the user's text based on their instruction.
@@ -15,11 +21,5 @@ export const SYSTEM_PROMPT_IMPROVE_WRITING = `You are an expert AI writing assis
 
 // This function constructs the final prompt sent to the model.
 export const buildFinalPrompt = (selectedText: string, userCommand: string): string => {
-  return `${SYSTEM_PROMPT_IMPROVE_WRITING}\n\nUser's selected text:\n\
-${selectedText}
-\
-\nUser's instruction:\n\
-${userCommand}
-\
-\nRevised text:`
+  return `${SYSTEM_PROMPT_IMPROVE_WRITING}\n\nUser's selected text:\n"""\n${selectedText}\n"""\n\nUser's instruction:\n"""\n${userCommand}\n"""\n\nRevised text:`;
 };

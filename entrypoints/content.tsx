@@ -42,7 +42,9 @@ export default defineContentScript({
         placement: 'top',
         middleware: [offset(8), flip(), shift({ padding: 5 })],
       }).then(({ x, y }) => {
-        Object.assign(tooltipContainer!.style, { left: `${x}px`, top: `${y}px` });
+        if(tooltipContainer) {
+            Object.assign(tooltipContainer.style, { left: `${x}px`, top: `${y}px` });
+        }
       });
     }
 
@@ -63,9 +65,15 @@ export default defineContentScript({
       icon.src = browser.runtime.getURL('icon/32.png');
       icon.style.cssText = 'width: 100%; height: 100%; cursor: pointer; pointer-events: auto; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
       
+      // IMPORTANT: Capture selection on mousedown, before the click event blurs the input.
+      icon.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // Prevents the browser from changing focus away from the text field.
+        lastSelectionSnapshot = selectionManager.snapshotSelection();
+      });
+
       icon.addEventListener('click', (e) => {
         e.stopPropagation();
-        showUIPrompt();
+        showUIPrompt(); // Now this can safely use the snapshot from mousedown.
       });
       
       icon.addEventListener('mouseenter', showTooltip);
@@ -89,7 +97,9 @@ export default defineContentScript({
             placement: 'right-start',
             middleware: [offset({ mainAxis: 4, crossAxis: 4 }), flip(), shift({ padding: 4 })]
         }).then(({x, y}) => {
-            Object.assign(currentIconContainer!.style, { left: `${x}px`, top: `${y}px` });
+            if (currentIconContainer) {
+                Object.assign(currentIconContainer.style, { left: `${x}px`, top: `${y}px` });
+            }
         });
     }
 
@@ -133,19 +143,23 @@ export default defineContentScript({
         uiReactRoot = createRoot(shadowHost);
     }
 
-    function showUIPrompt() {
-        const snapshot = selectionManager.snapshotSelection();
-        const selectedText = snapshot ? selectionManager.getSelectionText(snapshot) : '';
+    function showUIPrompt(fromShortcut: boolean = false) {
+        // If triggered by a shortcut, we need to snapshot the selection now.
+        // If triggered by icon click, the snapshot is already taken on mousedown.
+        if (fromShortcut) {
+            lastSelectionSnapshot = selectionManager.snapshotSelection();
+        }
 
-        if (snapshot && selectedText.trim()) {
-            lastSelectionSnapshot = snapshot;
+        const selectedText = lastSelectionSnapshot ? selectionManager.getSelectionText(lastSelectionSnapshot) : '';
+
+        if (lastSelectionSnapshot && selectedText.trim()) {
             lastSelectedText = selectedText;
             
             const selectionRange = window.getSelection()?.getRangeAt(0);
             const referenceElement: Element | VirtualElement = selectionRange ? {
                 getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
                 getClientRects: () => selectionRange.getClientRects()
-            } as VirtualElement : snapshot.activeElement;
+            } as VirtualElement : lastSelectionSnapshot.activeElement;
             
             removeIcon(); // Hide icon when prompt opens
             createUIContainer();
@@ -158,6 +172,9 @@ export default defineContentScript({
                 uiState = 'prompt';
                 renderUI();
             });
+        } else {
+            // If no valid selection, reset the snapshot
+            lastSelectionSnapshot = null;
         }
     }
 
@@ -225,7 +242,7 @@ export default defineContentScript({
       if (modifier && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         e.stopPropagation();
-        uiState === 'hidden' ? showUIPrompt() : handleClose();
+        uiState === 'hidden' ? showUIPrompt(true) : handleClose();
       }
       
       if (e.key === 'Escape' && uiState !== 'hidden') {
@@ -235,13 +252,24 @@ export default defineContentScript({
       }
     }
     
-    // Hide icon if user clicks away
     function handleMouseDown(e: MouseEvent) {
-        const target = e.target as HTMLElement;
-        if (uiContainer && uiContainer.contains(target)) return;
-        if (currentIconContainer && currentIconContainer.shadowRoot?.contains(target)) return;
+        // Stop clicks on our UI from dismissing the icon or UI itself
+        if (e.target instanceof HTMLElement) {
+            if (e.target.closest('[data-extension-ui-container]')) return;
+            const shadowRoot = e.target.shadowRoot;
+            if (shadowRoot && shadowRoot.querySelector('img.extension-icon')) return;
+        }
+
+        // If any UI is open, don't interfere.
+        if (uiState !== 'hidden') return;
         
-        if (uiState === 'hidden') removeIcon();
+        // Otherwise, if a click happens away from the icon, remove the icon.
+        if(currentIconContainer) {
+            const iconEl = currentIconContainer.shadowRoot?.querySelector('img');
+            if(e.target !== iconEl){
+                removeIcon();
+            }
+        }
     }
 
     document.addEventListener('selectionchange', handleSelectionChange);
