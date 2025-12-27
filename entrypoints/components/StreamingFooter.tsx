@@ -99,7 +99,11 @@ export function StreamingFooter({ onInsert, onClose, onStop }: StreamingFooterPr
       <div ref={responseRef} style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '12px', padding: '8px', backgroundColor: currentColors.responseBg, borderRadius: '0.375rem', border: `1px solid ${currentColors.border}`, minHeight: '60px', whiteSpace: 'pre-wrap', wordWrap: 'break-word', color: currentColors.text }}>
         {error ? <div style={{ color: '#ef4444' }}>{error}</div> : streamedText}
         {isStreaming && !error && (
-          <span style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite', color: currentColors.text }}>▋</span>
+          streamedText.length === 0 ? (
+            <span style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite', color: currentColors.text }}>AI model working hard to generate response ...</span>
+          ) : (
+            <span style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite', color: currentColors.text }}>▋</span>
+          )
         )}
         <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
       </div>

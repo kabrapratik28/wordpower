@@ -99,6 +99,40 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
   };
   const currentColors = colors[theme];
 
+  const wordLimit = 1000;
+  const wordCount = selectedText.trim().split(/\s+/).filter(Boolean).length;
+
+  if (wordCount > wordLimit) {
+    return (
+        <div
+          className="wordpower-card"
+          style={{ 
+              backgroundColor: currentColors.cardBg, 
+              borderColor: currentColors.border,
+              color: currentColors.text
+            }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 500, color: '#ef4444' }}>Word Limit Exceeded</h3>
+            <button
+              onClick={onClose}
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: currentColors.subtext }}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
+    
+          <div style={{ padding: '8px', backgroundColor: currentColors.selectedBg, borderRadius: '0.375rem', border: `1px solid ${currentColors.border}` }}>
+            <p style={{ fontSize: '0.9rem', color: currentColors.text }}>
+              The selected text has {wordCount} words, which exceeds the {wordLimit}-word limit. Please select a shorter piece of text.
+            </p>
+          </div>
+        </div>
+      );
+  }
+
   return (
     <div
       className="wordpower-card"
