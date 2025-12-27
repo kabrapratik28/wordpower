@@ -1,4 +1,4 @@
-import React, { createElement } from 'react';
+import React, { createElement, useRef, useEffect } from 'react';
 import * as icons from 'lucide-react';
 import { useTheme } from '../utils/useTheme';
 import type { Prompt } from '../utils/constants';
@@ -12,6 +12,28 @@ interface AutocompletePopupProps {
 
 export function AutocompletePopup({ suggestions, activeIndex, onSelect, onHover }: AutocompletePopupProps) {
     const theme = useTheme();
+    const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
+
+    // Effect to scroll active item into view
+    useEffect(() => {
+        if (scrollContainerRef.current && activeIndex !== -1) {
+            const activeItem = scrollContainerRef.current.children[activeIndex] as HTMLElement;
+            if (activeItem) {
+                const container = scrollContainerRef.current;
+                const { offsetTop, offsetHeight } = activeItem;
+                const { scrollTop, clientHeight } = container;
+
+                // If item is above the current view
+                if (offsetTop < scrollTop) {
+                    container.scrollTop = offsetTop;
+                }
+                // If item is below the current view
+                else if (offsetTop + offsetHeight > scrollTop + clientHeight) {
+                    container.scrollTop = offsetTop + offsetHeight - clientHeight;
+                }
+            }
+        }
+    }, [activeIndex, suggestions]); // Re-run if activeIndex or suggestions change
 
     const colors = {
         light: {
@@ -72,7 +94,7 @@ export function AutocompletePopup({ suggestions, activeIndex, onSelect, onHover 
 
   return (
     <div style={popupStyle}>
-      <div style={{ overflowY: 'auto', maxHeight: '250px' /* Approx 5 items */ }}>
+      <div style={{ overflowY: 'auto', maxHeight: '250px' /* Approx 5 items */ }} ref={scrollContainerRef}>
         {suggestions.map((suggestion, index) => {
           const IconComponent = icons[suggestion.icon] || icons.Wand;
           return (
