@@ -1,11 +1,12 @@
 import React, { createElement } from 'react';
-import { PRESET_PROMPT_ICONS } from '../utils/constants';
+import * as icons from 'lucide-react';
 import { useTheme } from '../utils/useTheme';
+import type { Prompt } from '../utils/constants';
 
 interface AutocompletePopupProps {
-  suggestions: string[];
+  suggestions: Prompt[];
   activeIndex: number;
-  onSelect: (suggestion: string) => void;
+  onSelect: (suggestion: Prompt) => void;
   onHover: (index: number) => void;
 }
 
@@ -30,6 +31,18 @@ export function AutocompletePopup({ suggestions, activeIndex, onSelect, onHover 
     };
     const currentColors = colors[theme];
 
+    const handleSettingsClick = (e: React.MouseEvent) => {
+        console.log('Settings click handler fired');
+        e.preventDefault();
+        e.stopPropagation();
+        browser.runtime.sendMessage({ type: 'openSettingsPage' });
+    }
+
+    const onSelectWrapper = (suggestion: Prompt) => {
+        console.log('Suggestion selected:', suggestion.name);
+        onSelect(suggestion);
+    }
+
     const popupStyle: React.CSSProperties = {
         position: 'absolute',
         width: '100%',
@@ -42,6 +55,8 @@ export function AutocompletePopup({ suggestions, activeIndex, onSelect, onHover 
         zIndex: 10,
         marginTop: '4px',
         overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
     };
 
     const getItemStyle = (index: number): React.CSSProperties => ({
@@ -52,24 +67,37 @@ export function AutocompletePopup({ suggestions, activeIndex, onSelect, onHover 
         fontSize: '0.9rem',
         color: currentColors.text,
         backgroundColor: index === activeIndex ? currentColors.hoverBg : 'transparent',
+        flexShrink: 0,
     });
 
   return (
     <div style={popupStyle}>
-      {suggestions.map((suggestion, index) => {
-        const IconComponent = PRESET_PROMPT_ICONS[suggestion];
-        return (
-          <div
-            key={suggestion}
-            style={getItemStyle(index)}
-            onClick={() => onSelect(suggestion)}
-            onMouseEnter={() => onHover(index)}
-          >
-            {IconComponent && createElement(IconComponent, { size: 18, style: { marginRight: '10px', color: currentColors.icon } })}
-            <span>{suggestion}</span>
-          </div>
-        );
-      })}
+      <div style={{ overflowY: 'auto', maxHeight: '250px' /* Approx 5 items */ }}>
+        {suggestions.map((suggestion, index) => {
+          const IconComponent = icons[suggestion.icon] || icons.Wand;
+          return (
+            <div
+              key={suggestion.id}
+              style={getItemStyle(index)}
+              onMouseDown={() => onSelectWrapper(suggestion)}
+              onMouseEnter={() => onHover(index)}
+            >
+              <IconComponent size={18} style={{ marginRight: '10px', color: currentColors.icon, flexShrink: 0 }} />
+              <span>{suggestion.name}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div 
+        style={{
+            ...getItemStyle(-1), // Use same base style, but without hover effect
+            borderTop: `1px solid ${currentColors.border}`,
+        }}
+        onMouseDown={handleSettingsClick}
+        >
+            <icons.Settings size={18} style={{ marginRight: '10px', color: currentColors.icon, flexShrink: 0 }} />
+            <span>Manage Prompts</span>
+      </div>
     </div>
   );
 }

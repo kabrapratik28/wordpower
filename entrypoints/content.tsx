@@ -35,6 +35,7 @@ export default defineContentScript({
     let uiContainer: HTMLElement | null = null;
     let uiShadowRoot: ShadowRoot | null = null;
     let uiReactRoot: Root | null = null;
+    let backdropElement: HTMLDivElement | null = null;
     
     let lastSelectionSnapshot: selectionManager.SelectionSnapshot | null = null;
     let lastPosition: { x: number; y: number } | null = null;
@@ -179,10 +180,12 @@ export default defineContentScript({
         createUIContainer();
 
         // Add a backdrop
-        const backdrop = document.createElement('div');
-        backdrop.style.cssText =
-          'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0, 0, 0, 0.2); z-index: 2147483646;';
-        document.body.appendChild(backdrop);
+        if (!backdropElement) {
+          backdropElement = document.createElement('div');
+          backdropElement.style.cssText =
+            'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0, 0, 0, 0.2); z-index: 2147483646;';
+          document.body.appendChild(backdropElement);
+        }
 
         // Center the UI container
         uiContainer!.style.left = '50%';
@@ -191,15 +194,6 @@ export default defineContentScript({
 
         uiState = 'prompt';
         renderUI();
-
-        // Override handleClose to also remove the backdrop
-        const originalClose = handleClose;
-        handleClose = () => {
-          backdrop.remove();
-          originalClose();
-          handleClose = originalClose; // Restore original
-        };
-
       } else {
         lastSelectionSnapshot = null;
       }
@@ -234,6 +228,10 @@ export default defineContentScript({
     function handleClose() {
       if (uiState === 'streaming') handleStop();
       uiState = 'hidden';
+      if (backdropElement) {
+        backdropElement.remove();
+        backdropElement = null;
+      }
       renderUI();
     }
 
@@ -283,11 +281,19 @@ export default defineContentScript({
     
     function handleMouseDown(e: MouseEvent) {
         const path = e.composedPath();
-        if (currentIconContainer && path.includes(currentIconContainer)) return;
-        if (uiContainer && path.includes(uiContainer)) return;
-
-        if (uiState === 'hidden') {
+        if (uiContainer && path.includes(uiContainer)) {
+          // Click is inside the UI, do nothing.
+          return;
+        }
+    
+        // If we reach here, the click is outside the UI.
+        if (uiState !== 'hidden') {
+          handleClose();
+        } else {
+          // If UI is hidden, we might just need to clean up the floating icon
+          if (currentIconContainer && !path.includes(currentIconContainer)) {
             removeIcon();
+          }
         }
     }
 

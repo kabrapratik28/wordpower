@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CornerDownLeft, X } from 'lucide-react';
-import { PROMPT_PLACEHOLDER, PRESET_PROMPTS } from '../utils/constants';
+import { PROMPT_PLACEHOLDER, DEFAULT_PROMPTS, type Prompt } from '../utils/constants';
 import { AutocompletePopup } from './AutocompletePopup';
 import { useTheme } from '../utils/useTheme';
+
+import { getPrompts } from '../utils/prompts';
 
 interface FloatingPromptProps {
   onClose: () => void;
@@ -12,18 +14,34 @@ interface FloatingPromptProps {
 
 export default function FloatingPrompt({ onClose, onSend, selectedText }: FloatingPromptProps) {
   const [command, setCommand] = useState('');
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [autocompleteVisible, setAutocompleteVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const theme = useTheme();
 
   useEffect(() => {
+    // Load prompts from storage when component mounts
+    getPrompts().then(setPrompts);
+
     textareaRef.current?.focus();
     if (command === '') setAutocompleteVisible(true);
+
+    // Listen for updates from the settings page
+    const handleMessage = (message: any) => {
+        if (message.type === 'promptsUpdated') {
+            getPrompts().then(setPrompts);
+        }
+    };
+    browser.runtime.onMessage.addListener(handleMessage);
+    return () => browser.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
   const handleSend = () => {
-    if (command.trim()) onSend(command);
+    if (command.trim()) {
+      const matchingPrompt = prompts.find(p => p.name === command.trim());
+      onSend(matchingPrompt ? matchingPrompt.value : command);
+    }
   };
   
   const handleCommandChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -35,13 +53,13 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
     if (autocompleteVisible) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveIndex((prev) => (prev + 1) % PRESET_PROMPTS.length);
+        setActiveIndex((prev) => (prev + 1) % prompts.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveIndex((prev) => (prev - 1 + PRESET_PROMPTS.length) % PRESET_PROMPTS.length);
+        setActiveIndex((prev) => (prev - 1 + prompts.length) % prompts.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        setCommand(PRESET_PROMPTS[activeIndex]);
+        setCommand(prompts[activeIndex].name);
         setAutocompleteVisible(false);
       } else if (e.key === 'Escape') {
         setAutocompleteVisible(false);
@@ -53,8 +71,8 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
     }
   };
   
-  const selectAutocomplete = (suggestion: string) => {
-    setCommand(suggestion);
+  const selectAutocomplete = (suggestion: Prompt) => {
+    setCommand(suggestion.name);
     setAutocompleteVisible(false);
     textareaRef.current?.focus();
   }
@@ -130,7 +148,7 @@ export default function FloatingPrompt({ onClose, onSend, selectedText }: Floati
         />
         {autocompleteVisible && (
             <AutocompletePopup 
-                suggestions={PRESET_PROMPTS}
+                suggestions={prompts}
                 activeIndex={activeIndex}
                 onSelect={selectAutocomplete}
                 onHover={setActiveIndex}

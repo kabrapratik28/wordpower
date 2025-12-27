@@ -105,12 +105,14 @@ export default defineBackground(() => {
         return true;
       } else if (message.type === "updateOllamaConfig") {
         const { host, port } = message.payload;
-        reconfigureOllama(host, port);
-        checkOllamaStatus();
-        return;
-      }
-
-      return false;
+              reconfigureOllama(host, port);
+              checkOllamaStatus();
+              return;
+                } else if (message.type === 'openSettingsPage') {
+                  console.log('Received openSettingsPage message, opening options page.');
+                  browser.runtime.openOptionsPage();
+                  return;
+                }      return false;
     }
   );
 
