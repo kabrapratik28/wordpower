@@ -75,36 +75,46 @@ export function restoreSelection(textToInsert: string, snapshot: SelectionSnapsh
   }
 
   activeElement.focus();
-
+  
+  // Restore selection first
   if ('range' in snapshot) {
-    // Content-editable
     const sel = window.getSelection();
     if (sel) {
-        // Check if the range is still valid
         try {
-            // A simple check to see if the range is still somewhat attached to the document
             if(snapshot.range.startContainer.ownerDocument !== document) {
                 throw new Error("Range is no longer in the document.");
             }
             sel.removeAllRanges();
             sel.addRange(snapshot.range);
-            snapshot.range.deleteContents();
-            const textNode = document.createTextNode(textToInsert);
-            snapshot.range.insertNode(textNode);
-            // Move cursor to the end of the inserted text
-            snapshot.range.setStartAfter(textNode);
-            snapshot.range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(snapshot.range);
-        } catch (e) {
-            console.warn("Original selection range seems to be invalid. Falling back to current selection.", e);
-            document.execCommand('insertText', false, textToInsert);
+        } catch(e) {
+            console.warn("Could not restore selection range.", e);
         }
     }
   } else {
-    // Textarea or Input
     const { start, end } = snapshot;
     const inputElement = activeElement as HTMLTextAreaElement | HTMLInputElement;
-    inputElement.setRangeText(textToInsert, start, end, 'select');
+    inputElement.setSelectionRange(start, end);
+  }
+
+  // Now, perform the insertion. This should replace the selected text.
+  // Using execCommand is crucial for the undo/redo stack.
+  const success = document.execCommand('insertText', false, textToInsert);
+
+  // If execCommand fails, fall back to manual insertion.
+  if (!success) {
+      console.warn("execCommand('insertText') failed. Falling back to manual insertion.");
+      if ('range' in snapshot) {
+          const sel = window.getSelection();
+          if(sel && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              const textNode = document.createTextNode(textToInsert);
+              range.insertNode(textNode);
+          }
+      } else {
+          const { start, end } = snapshot;
+          const inputElement = activeElement as HTMLTextAreaElement | HTMLInputElement;
+          inputElement.setRangeText(textToInsert, start, end, 'select');
+      }
   }
 }
