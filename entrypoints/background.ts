@@ -19,13 +19,9 @@ async function checkOllamaStatus() {
     await ollama.list();
     lastKnownStatus = 'connected';
     lastKnownError = '';
-    browser.action.setBadgeBackgroundColor({ color: '#22c55e' });
-    browser.action.setBadgeText({ text: ' ' });
   } catch (e: any) {
     lastKnownStatus = 'error';
     lastKnownError = e.message || 'Failed to connect to Ollama. Make sure it is running and CORS is configured for browser access.';
-    browser.action.setBadgeBackgroundColor({ color: '#ef4444' });
-    browser.action.setBadgeText({ text: ' ' });
   }
   browser.runtime.sendMessage({
     type: 'ollamaStatusUpdate',
