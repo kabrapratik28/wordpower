@@ -6,6 +6,8 @@ function Settings() {
   const [blacklist, setBlacklist] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
+  const [ollamaHost, setOllamaHost] = useState('127.0.0.1');
+  const [ollamaPort, setOllamaPort] = useState('11434');
   const [ollamaStatus, setOllamaStatus] = useState<'connected' | 'error'>('error');
   const [ollamaError, setOllamaError] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
@@ -17,9 +19,11 @@ function Settings() {
 
   // Load settings from storage on component mount
   useEffect(() => {
-    browser.storage.local.get(['blacklist', 'selectedModel']).then((result) => {
+    browser.storage.local.get(['blacklist', 'selectedModel', 'ollamaHost', 'ollamaPort']).then((result) => {
       if (result.blacklist) setBlacklist(result.blacklist.join('\n'));
       setSelectedModel(result.selectedModel || DEFAULT_MODEL);
+      if (result.ollamaHost) setOllamaHost(result.ollamaHost);
+      if (result.ollamaPort) setOllamaPort(result.ollamaPort);
     });
 
     const handleStatusUpdate = (message: any) => {
@@ -57,6 +61,13 @@ function Settings() {
           setOllamaError(err => err ? `${err}\n${response.error}`: response.error);
       }
   }
+
+  const handleSaveConnection = () => {
+    browser.storage.local.set({ ollamaHost, ollamaPort }).then(() => {
+        showSaveFeedback('Connection settings saved!');
+        browser.runtime.sendMessage({ type: 'updateOllamaConfig', payload: { host: ollamaHost, port: ollamaPort } });
+    });
+  };
 
   const handleSaveBlacklist = () => {
     const blacklistArray = blacklist.split('\n').filter(url => url.trim() !== '');
@@ -96,6 +107,18 @@ function Settings() {
           </div>
         )}
         
+        <div className="connection-inputs">
+            <div>
+                <label htmlFor="ollama-host">Ollama Host</label>
+                <input type="text" id="ollama-host" value={ollamaHost} onChange={(e) => setOllamaHost(e.target.value)} />
+            </div>
+            <div>
+                <label htmlFor="ollama-port">Port</label>
+                <input type="text" id="ollama-port" value={ollamaPort} onChange={(e) => setOllamaPort(e.target.value)} />
+            </div>
+        </div>
+        <button onClick={handleSaveConnection} style={{marginTop: '12px'}}>Save Connection</button>
+
         <label htmlFor="model-select" style={{marginTop: '16px'}}>Active Model</label>
         <select id="model-select" value={selectedModel} onChange={handleModelChange} disabled={models.length === 0}>
           {models.length > 0 ? (
