@@ -142,7 +142,7 @@ export default defineContentScript({
 
       let componentToRender;
       if (uiState === 'prompt') {
-        componentToRender = React.createElement(FloatingPrompt, { selectedText: lastSelectedText, onSend: handleSend, onClose: handleClose, });
+        componentToRender = React.createElement(FloatingPrompt, { selectedText: lastSelectedText, onSend: handleSend, onClose: handleClose });
       } else if (uiState === 'streaming') {
         componentToRender = React.createElement(StreamingFooter, { onInsert: handleInsert, onClose: handleClose, onStop: handleStop, });
       }
@@ -164,36 +164,45 @@ export default defineContentScript({
     }
 
     async function showUIPrompt(fromShortcut: boolean = false) {
-        if (fromShortcut) {
-            lastSelectionSnapshot = selectionManager.snapshotSelection();
-        }
+      if (fromShortcut) {
+        lastSelectionSnapshot = selectionManager.snapshotSelection();
+      }
 
-        const selectedText = lastSelectionSnapshot ? selectionManager.getSelectionText(lastSelectionSnapshot) : '';
+      const selectedText = lastSelectionSnapshot
+        ? selectionManager.getSelectionText(lastSelectionSnapshot)
+        : '';
 
-        if (lastSelectionSnapshot && selectedText.trim()) {
-            lastSelectedText = selectedText;
-            
-            const selectionRange = window.getSelection()?.getRangeAt(0);
-            const referenceElement: Element | VirtualElement = selectionRange && selectionRange.getBoundingClientRect().width > 0 ? {
-                getBoundingClientRect: () => selectionRange.getBoundingClientRect(),
-                getClientRects: () => selectionRange.getClientRects()
-            } as VirtualElement : lastSelectionSnapshot.activeElement;
-            
-            removeIcon();
-            createUIContainer();
-            
-            const { x, y } = await computePosition(referenceElement, uiContainer!, {
-                placement: 'top-start',
-                middleware: [offset({ mainAxis: 8 }), flip(), shift({ padding: 16 })]
-            });
+      if (lastSelectionSnapshot && selectedText.trim()) {
+        lastSelectedText = selectedText;
 
-            lastPosition = { x, y };
-            uiState = 'prompt';
-            renderUI();
+        removeIcon();
+        createUIContainer();
 
-        } else {
-            lastSelectionSnapshot = null;
-        }
+        // Add a backdrop
+        const backdrop = document.createElement('div');
+        backdrop.style.cssText =
+          'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0, 0, 0, 0.2); z-index: 2147483646;';
+        document.body.appendChild(backdrop);
+
+        // Center the UI container
+        uiContainer!.style.left = '50%';
+        uiContainer!.style.top = '50%';
+        uiContainer!.style.transform = 'translate(-50%, -50%)';
+
+        uiState = 'prompt';
+        renderUI();
+
+        // Override handleClose to also remove the backdrop
+        const originalClose = handleClose;
+        handleClose = () => {
+          backdrop.remove();
+          originalClose();
+          handleClose = originalClose; // Restore original
+        };
+
+      } else {
+        lastSelectionSnapshot = null;
+      }
     }
 
     // --- Action Handlers ---
