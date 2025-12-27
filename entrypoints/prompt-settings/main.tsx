@@ -70,6 +70,24 @@ function PromptSettingsPage() {
             </header>
             
             <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-6">
+                {/* Header for Prompt Columns */}
+                <div className="hidden md:flex items-center gap-4 px-4 pb-2 border-b border-gray-200 text-gray-600 text-sm font-semibold mb-4">
+                    {/* Placeholder for Move Buttons column - roughly w-10 (40px) to match the move button group */}
+                    <div className="w-10 flex-shrink-0"></div> 
+
+                    {/* Labels for Prompt Name and Prompt Value - matching the `flex-grow grid grid-cols-2` div */}
+                    <div className="flex-grow grid grid-cols-2 gap-3">
+                        <span className="text-left">Prompt Shortcut</span>
+                        <span className="text-left">Command to AI</span>
+                    </div>
+
+                    {/* Label for Icon Picker - matching the `IconPicker`'s space, approx w-36 (144px) */}
+                    <div className="flex-shrink-0 w-36 text-left">Icon</div> 
+                    
+                    {/* Placeholder for Delete Button - roughly w-8 (32px) to match the delete button */}
+                    <div className="w-8 flex-shrink-0"></div> 
+                </div>
+
                 <div className="space-y-6 mb-6">
                     {prompts.map((prompt, index) => {
                         const IconComponent = icons[prompt.icon] || icons.Wand;
