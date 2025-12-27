@@ -1,6 +1,6 @@
 {
-  "name": "wxt-react-starter",
-  "description": "manifest.json description",
+  "name": "wordpower",
+  "description": "✨ Improve Your Writing — 100% Private, Free & Open Source, Powered by On-Device AI",
   "private": true,
   "version": "0.0.0",
   "type": "module",

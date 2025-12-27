@@ -4,8 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
-    name: "WordPower",
-    description: "Extension that shows an icon in text fields when typing",
+    name: "✨ WordPower",
+    description: "Improve Your Writing — 100% Private, Free & Open Source, Powered by On-Device AI",
     version: "0.0.1",
     action: {
       default_popup: "popup.html",
