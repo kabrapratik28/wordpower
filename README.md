@@ -45,9 +45,9 @@ For the extension to communicate with your local Ollama instance, you need to en
 ### macOS
 
 1.  Open the Terminal app.
-2.  Run the following command, replacing `hiojmdigeiphnjlmbknaeklijhcmcnbl` with the ID you found above:
+2.  Run the following command, replacing `<your-extension-id>` with the ID you found above:
     ```bash
-    launchctl setenv OLLAMA_ORIGINS "chrome-extension://hiojmdigeiphnjlmbknaeklijhcmcnbl"
+    launchctl setenv OLLAMA_ORIGINS "chrome-extension://<your-extension-id>"
     ```
 3.  Restart the Ollama application.
 
@@ -56,7 +56,7 @@ For the extension to communicate with your local Ollama instance, you need to en
 1.  Quit Ollama from the system tray.
 2.  Search for "environment variables" in the Start menu and select "Edit environment variables for your account".
 3.  Under "User variables", click "New...".
-4.  Set "Variable name" to `OLLAMA_ORIGINS` and "Variable value" to `chrome-extension://hiojmdigeiphnjlmbknaeklijhcmcnbl`.
+4.  Set "Variable name" to `OLLAMA_ORIGINS` and "Variable value" to `chrome-extension://<your-extension-id>`.
 5.  Click OK and restart the Ollama application.
 
 ### Linux
@@ -65,10 +65,10 @@ For the extension to communicate with your local Ollama instance, you need to en
     ```bash
     sudo systemctl edit ollama.service
     ```
-2.  Add the following lines, replacing `hiojmdigeiphnjlmbknaeklijhcmcnbl` with the ID you found above:
+2.  Add the following lines, replacing `<your-extension-id>` with the ID you found above:
     ```ini
     [Service]
-    Environment="OLLAMA_ORIGINS=chrome-extension://hiojmdigeiphnjlmbknaeklijhcmcnbl"
+    Environment="OLLAMA_ORIGINS=chrome-extension://<your-extension-id>"
     ```
 3.  Save the file, then reload systemd and restart Ollama:
     ```bash

@@ -21,7 +21,7 @@ export default defineConfig({
         matches: ["<all_urls>"],
       },
     ],
-    host_permissions: ["http://127.0.0.1:*", "http://localhost:*"],
+    host_permissions: ["*://127.0.0.1/*", "*://localhost/*"],
   },
   vite: () => ({
     plugins: [tailwindcss()],
