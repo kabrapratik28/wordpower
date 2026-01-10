@@ -69,7 +69,8 @@ body.dark label {
 }
 
 textarea,
-select {
+select,
+input[type="text"] {
   width: 100%;
   padding: 8px 12px;
   font-size: 0.875rem;
@@ -80,7 +81,8 @@ select {
 }
 
 body.dark textarea,
-body.dark select {
+body.dark select,
+body.dark input[type="text"] {
     background-color: #374151; /* gray-700 */
     border-color: #4b5563; /* gray-600 */
     color: #f9fafb; /* gray-50 */
