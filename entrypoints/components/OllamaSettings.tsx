@@ -9,6 +9,8 @@ export function OllamaSettings() {
   const [ollamaPort, setOllamaPort] = useState('11434');
   const [ollamaStatus, setOllamaStatus] = useState<'connected' | 'error'>('error');
   const [ollamaError, setOllamaError] = useState('');
+  const [ollamaHostError, setOllamaHostError] = useState('');
+  const [ollamaPortError, setOllamaPortError] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
 
   // Load settings from storage on component mount
@@ -57,10 +59,47 @@ export function OllamaSettings() {
   }
 
   const handleSaveConnection = () => {
-    browser.storage.local.set({ ollamaHost, ollamaPort }).then(() => {
-        showSaveFeedback('Connection settings saved!');
-        browser.runtime.sendMessage({ type: 'updateOllamaConfig', payload: { host: ollamaHost, port: ollamaPort } });
-    });
+    const isPortValid = validateOllamaPort();
+
+    if (validateOllamaHost() && isPortValid) {
+      browser.storage.local.set({ ollamaHost, ollamaPort }).then(() => {
+          showSaveFeedback('Connection settings saved!');
+          browser.runtime.sendMessage({ type: 'updateOllamaConfig', payload: { host: ollamaHost, port: ollamaPort } });
+      });
+    }
+  };
+
+  const validateOllamaHost = () => {
+    if (ollamaHost !== 'localhost' && ollamaHost !== '127.0.0.1') {
+      setOllamaHostError('Host must be "localhost" or "127.0.0.1".');
+      return false;
+    }
+    setOllamaHostError('');
+    return true;
+  };
+
+  const validateOllamaPort = () => {
+    const portNum = parseInt(ollamaPort, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      setOllamaPortError('Port must be a number between 1 and 65535.');
+      return false;
+    }
+    setOllamaPortError('');
+    return true;
+  };
+
+  const handleHostChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setOllamaHost(e.target.value);
+    if (ollamaHostError) {
+      setOllamaHostError('');
+    }
+  };
+
+  const handlePortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setOllamaPort(e.target.value);
+    if (ollamaPortError) {
+      setOllamaPortError('');
+    }
   };
 
   const handleSaveBlacklist = () => {
@@ -102,11 +141,13 @@ export function OllamaSettings() {
         <div className="connection-inputs">
             <div>
                 <label htmlFor="ollama-host">Ollama Host</label>
-                <input type="text" id="ollama-host" value={ollamaHost} onChange={(e) => setOllamaHost(e.target.value)} />
+                <input type="text" id="ollama-host" value={ollamaHost} onChange={handleHostChange} />
+                {ollamaHostError && <p className="error-message">{ollamaHostError}</p>}
             </div>
             <div>
                 <label htmlFor="ollama-port">Port</label>
-                <input type="text" id="ollama-port" value={ollamaPort} onChange={(e) => setOllamaPort(e.target.value)} />
+                <input type="text" id="ollama-port" value={ollamaPort} onChange={handlePortChange} />
+                {ollamaPortError && <p className="error-message">{ollamaPortError}</p>}
             </div>
         </div>
         <button onClick={handleSaveConnection} style={{marginTop: '12px'}}>Save Connection</button>

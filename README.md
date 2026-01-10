@@ -38,16 +38,16 @@ To get started with developing WordPower locally, you'll need to have Node.js an
 
 ## Enabling Ollama for Web UI
 
-For the extension to communicate with your local Ollama instance, you need to enable Cross-Origin Resource Sharing (CORS).
+For the extension to communicate with your local Ollama instance, you need to enable Cross-Origin Resource Sharing (CORS). For better security, you should restrict access to the extension's ID.
 
-**Note:** The following instructions allow any website to access your Ollama instance. For better security, you can restrict access to the extension's ID by replacing `*` with `chrome-extension://<your-extension-id>`.
+**Note:** You can find your extension's ID by navigating to `chrome://extensions` in your browser.
 
 ### macOS
 
 1.  Open the Terminal app.
-2.  Run the following command:
+2.  Run the following command, replacing `<your-extension-id>` with the ID you found above:
     ```bash
-    launchctl setenv OLLAMA_ORIGINS "*"
+    launchctl setenv OLLAMA_ORIGINS "chrome-extension://<your-extension-id>"
     ```
 3.  Restart the Ollama application.
 
@@ -56,7 +56,7 @@ For the extension to communicate with your local Ollama instance, you need to en
 1.  Quit Ollama from the system tray.
 2.  Search for "environment variables" in the Start menu and select "Edit environment variables for your account".
 3.  Under "User variables", click "New...".
-4.  Set "Variable name" to `OLLAMA_ORIGINS` and "Variable value" to `*`.
+4.  Set "Variable name" to `OLLAMA_ORIGINS` and "Variable value" to `chrome-extension://<your-extension-id>`.
 5.  Click OK and restart the Ollama application.
 
 ### Linux
@@ -65,10 +65,10 @@ For the extension to communicate with your local Ollama instance, you need to en
     ```bash
     sudo systemctl edit ollama.service
     ```
-2.  Add the following lines:
+2.  Add the following lines, replacing `<your-extension-id>` with the ID you found above:
     ```ini
     [Service]
-    Environment="OLLAMA_ORIGINS=*"
+    Environment="OLLAMA_ORIGINS=chrome-extension://<your-extension-id>"
     ```
 3.  Save the file, then reload systemd and restart Ollama:
     ```bash
